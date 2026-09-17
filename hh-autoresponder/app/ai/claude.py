@@ -81,11 +81,15 @@ class ClaudeAI:
         user_msg = "Напиши сопроводительное письмо для этой вакансии."
         text, inp_tok, out_tok = await self._call(system, user_msg, max_tokens=1500)
         
+        if not text:
+            return "❌ Ошибка генерации письма (API недоступно или вернуло ошибку 503). Попробуйте позже.", 0, 0
+
         if humanize:
             humanize_system = get_humanizer_prompt()
             humanize_msg = f"Очеловечь следующий текст сопроводительного письма, используя свои правила:\n\n{text}"
             humanized_text, h_inp, h_out = await self._call(humanize_system, humanize_msg, max_tokens=1500)
-            text = humanized_text
+            if humanized_text:
+                text = humanized_text
             inp_tok += h_inp
             out_tok += h_out
 
