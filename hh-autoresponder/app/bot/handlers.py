@@ -530,7 +530,8 @@ async def cb_apply(callback: CallbackQuery, **kw):
 
     await callback.answer("🤖 Генерирую письмо...")
 
-    letter, _, _ = await claude_ai.generate_cover_letter(title, desc, "")
+    humanize = _scheduler.humanize_letters if _scheduler else False
+    letter, _, _ = await claude_ai.generate_cover_letter(title, desc, "", humanize=humanize)
 
     await callback.message.answer(
         letter,
@@ -806,7 +807,8 @@ async def cb_bump_resume(callback: CallbackQuery, **kw):
 
 _BEHAVIOR_DEFAULTS = {
     "auto_apply": False, "pass_tests": True, "ai_cover_letters": False,
-    "notify_messages": True, "thank_rejections": True, "bump_resume": True,
+    "humanize_letters": False, "notify_messages": True, 
+    "thank_rejections": True, "bump_resume": True,
 }
 
 
@@ -821,8 +823,9 @@ async def cb_behavior_menu(callback: CallbackQuery, **kw):
         "• <b>Авто-отклики</b> — сам откликается на вакансии\n"
         "• <b>Проходить тесты</b> — AI отвечает на вопросы/тесты работодателя\n"
         "• <b>Писать письма через AI</b> — ИИ генерирует текст под вакансию (тратит токены)\n"
+        "• <b>Гуманизатор текста (Анти-ИИ)</b> — второй проход нейросети (detectai) для маскировки ИИ-штампов\n"
         "• <b>Сообщать о рекрутёрах</b> — уведомления о реальных ответах (приглашения, интервью)\n"
-        "• <b>Благодарить за отказ</b> — авто-сообщение спасибо при отказе\n"
+        "• <b>Говорить спасибо за отказ</b> — авто-сообщение спасибо при отказе\n"
         "• <b>Поднимать резюме</b> — авто-поднятие резюме каждые 4 часа",
         parse_mode="HTML",
         reply_markup=behavior_keyboard(flags),
@@ -1106,7 +1109,8 @@ async def cmd_test_apply(message: Message, **kw):
         await message.answer(f"<b>[{tag}]</b> {title}\n🏢 {company}\n🤖 Генерирую письмо...", parse_mode="HTML")
 
         try:
-            letter, _, _ = await claude_ai.generate_cover_letter(v.title, v.description or "")
+            humanize = _scheduler.humanize_letters if _scheduler else False
+            letter, _, _ = await claude_ai.generate_cover_letter(v.title, v.description or "", humanize=humanize)
         except Exception as e:
             await message.answer(f"❌ AI ошибка: {e}")
             stats["failed"] += 1
@@ -1123,7 +1127,8 @@ async def cmd_test_apply(message: Message, **kw):
         if res is False and (info or {}).get("error") == "needs_test":
             await message.answer(f"📋 <b>[{tag}]</b> Опросник — переключаюсь на Playwright…", parse_mode="HTML")
             try:
-                ai_letter, _, _ = await claude_ai.generate_cover_letter(v.title, v.description or "")
+                humanize = _scheduler.humanize_letters if _scheduler else False
+                ai_letter, _, _ = await claude_ai.generate_cover_letter(v.title, v.description or "", humanize=humanize)
             except Exception:
                 ai_letter = letter
             from app.parsers.hh import HHParser

@@ -9,6 +9,7 @@ from app.ai.prompts import (
     SYSTEM_SENTIMENT_ANALYZER,
     SYSTEM_COVER_LETTER_GENERATOR,
 )
+from app.ai.humanizer import get_humanizer_prompt
 
 log = structlog.get_logger()
 
@@ -68,7 +69,7 @@ class ClaudeAI:
         usage = data.get("usage") or {}
         return text, int(usage.get("prompt_tokens", 0) or 0), int(usage.get("completion_tokens", 0) or 0)
 
-    async def generate_cover_letter(self, vacancy_title: str, vacancy_description: str, company_name: str = "") -> tuple[str, int, int]:
+    async def generate_cover_letter(self, vacancy_title: str, vacancy_description: str, company_name: str = "", humanize: bool = False) -> tuple[str, int, int]:
         if not _ai_ready():
             return settings.cover_letter, 0, 0
         system = SYSTEM_COVER_LETTER_GENERATOR.format(
@@ -78,7 +79,16 @@ class ClaudeAI:
             vacancy_description=vacancy_description[:2000]  # Limit to save tokens
         )
         user_msg = "Напиши сопроводительное письмо для этой вакансии."
-        text, inp_tok, out_tok = await self._call(system, user_msg, max_tokens=600)
+        text, inp_tok, out_tok = await self._call(system, user_msg, max_tokens=1500)
+        
+        if humanize:
+            humanize_system = get_humanizer_prompt()
+            humanize_msg = f"Очеловечь следующий текст сопроводительного письма, используя свои правила:\n\n{text}"
+            humanized_text, h_inp, h_out = await self._call(humanize_system, humanize_msg, max_tokens=1500)
+            text = humanized_text
+            inp_tok += h_inp
+            out_tok += h_out
+
         return text.strip(), inp_tok, out_tok
 
     async def generate_reply(self, recruiter_message: str, vacancy_context: str = "", platform: str = "") -> tuple[str, int, int]:

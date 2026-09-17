@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     # ── LLM (опционально: только для прохождения тестов работодателя) ──
     ai_enabled: bool = False
+    humanize_letters: bool = False
     llm_base_url: str = "https://api.polza.ai/api/v1"   # OpenAI-совместимый эндпоинт
     llm_api_key: str = ""
     llm_model: str = "deepseek/deepseek-v4-flash"

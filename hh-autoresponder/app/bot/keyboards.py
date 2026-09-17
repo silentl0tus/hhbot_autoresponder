@@ -97,8 +97,9 @@ _FLAG_LABELS = {
     "auto_apply": "Авто-отклики",
     "pass_tests": "Проходить тесты вакансий",
     "ai_cover_letters": "Писать письма через AI",
+    "humanize_letters": "Гуманизатор текста (Анти-ИИ)",
     "notify_messages": "Сообщать о рекрутёрах",
-    "thank_rejections": "Благодарить за отказ",
+    "thank_rejections": "Говорить спасибо за отказ",
     "bump_resume": "Поднимать резюме",
 }
 
