@@ -7,6 +7,7 @@ from app.config import settings
 from app.ai.prompts import (
     SYSTEM_REPLY_GENERATOR,
     SYSTEM_SENTIMENT_ANALYZER,
+    SYSTEM_COVER_LETTER_GENERATOR,
 )
 
 log = structlog.get_logger()
@@ -68,8 +69,17 @@ class ClaudeAI:
         return text, int(usage.get("prompt_tokens", 0) or 0), int(usage.get("completion_tokens", 0) or 0)
 
     async def generate_cover_letter(self, vacancy_title: str, vacancy_description: str, company_name: str = "") -> tuple[str, int, int]:
-        # Письмо не генерится AI — всем уходит фиксированный текст из настроек.
-        return settings.cover_letter, 0, 0
+        if not _ai_ready():
+            return settings.cover_letter, 0, 0
+        system = SYSTEM_COVER_LETTER_GENERATOR.format(
+            resume=settings.resume_text,
+            company_name=company_name or "Уважаемый работодатель",
+            vacancy_title=vacancy_title,
+            vacancy_description=vacancy_description[:2000]  # Limit to save tokens
+        )
+        user_msg = "Напиши сопроводительное письмо для этой вакансии."
+        text, inp_tok, out_tok = await self._call(system, user_msg, max_tokens=600)
+        return text.strip(), inp_tok, out_tok
 
     async def generate_reply(self, recruiter_message: str, vacancy_context: str = "", platform: str = "") -> tuple[str, int, int]:
         if not _ai_ready():

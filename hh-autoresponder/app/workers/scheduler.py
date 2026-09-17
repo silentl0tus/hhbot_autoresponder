@@ -27,6 +27,7 @@ class WorkerScheduler:
         self.auto_apply = state.get("auto_apply", False)
         # Флаги «что делает бот» (галочки в боте). По умолчанию включены.
         self.pass_tests = state.get("pass_tests", True)
+        self.ai_cover_letters = state.get("ai_cover_letters", False)
         self.notify_messages = state.get("notify_messages", True)
         self.thank_rejections = state.get("thank_rejections", True)
         self.bump_resume = state.get("bump_resume", True)
@@ -67,6 +68,7 @@ class WorkerScheduler:
             state["is_paused"] = self.is_paused
             state["auto_apply"] = self.auto_apply
             state["pass_tests"] = self.pass_tests
+            state["ai_cover_letters"] = self.ai_cover_letters
             state["notify_messages"] = self.notify_messages
             state["thank_rejections"] = self.thank_rejections
             state["bump_resume"] = self.bump_resume
@@ -641,7 +643,7 @@ class WorkerScheduler:
         log.info("auto_apply_set", enabled=enabled)
 
     # Флаги «что делает бот» для меню с галочками
-    FLAG_NAMES = ("auto_apply", "pass_tests", "notify_messages", "thank_rejections", "bump_resume")
+    FLAG_NAMES = ("auto_apply", "pass_tests", "notify_messages", "thank_rejections", "bump_resume", "ai_cover_letters")
 
     def get_flags(self) -> dict:
         return {n: bool(getattr(self, n, True)) for n in self.FLAG_NAMES}

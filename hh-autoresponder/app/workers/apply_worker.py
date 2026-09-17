@@ -2,6 +2,7 @@ import asyncio
 import re
 import structlog
 from sqlalchemy import select, func, case
+from sqlalchemy.orm import joinedload
 
 from app.config import settings
 from app.database import async_session
@@ -58,6 +59,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
             paused_platforms = set(_st.get("paused_platforms", []))
             paused_platforms |= set(_st.get("manual_paused_platforms", []))
             pass_tests = _st.get("pass_tests", True)
+            ai_cover_letters = _st.get("ai_cover_letters", False)
     except Exception as e:
         log.warning("read_paused_platforms_error", error=str(e))
 
@@ -132,6 +134,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
         for plat, limit in remaining_by_plat.items():
             result = await session.execute(
                 select(Vacancy)
+                .options(joinedload(Vacancy.company))
                 .where(
                     Vacancy.platform == plat,
                     Vacancy.status == VacancyStatus.APPROVED,
@@ -169,8 +172,16 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
         if vacancy.platform in aborted_platforms:
             continue
         try:
-            # Всем откликам — одно фиксированное письмо из настроек (COVER_LETTER).
-            letter = render_letter(vacancy.title)
+            if ai_cover_letters and settings.ai_enabled and settings.llm_api_key:
+                from app.ai.claude import claude_ai
+                cname = vacancy.company.name if vacancy.company else ""
+                letter, _, _ = await claude_ai.generate_cover_letter(
+                    vacancy_title=vacancy.title,
+                    vacancy_description=vacancy.description or "",
+                    company_name=cname
+                )
+            else:
+                letter = render_letter(vacancy.title)
 
             # HH через OAuth API (быстро, обходит DDoS Guard)
             result = False

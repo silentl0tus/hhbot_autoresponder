@@ -801,8 +801,8 @@ async def cb_bump_resume(callback: CallbackQuery, **kw):
 
 
 _BEHAVIOR_DEFAULTS = {
-    "auto_apply": False, "pass_tests": True, "notify_messages": True,
-    "thank_rejections": True, "bump_resume": True,
+    "auto_apply": False, "pass_tests": True, "ai_cover_letters": False,
+    "notify_messages": True, "thank_rejections": True, "bump_resume": True,
 }
 
 
@@ -816,6 +816,7 @@ async def cb_behavior_menu(callback: CallbackQuery, **kw):
         "Нажми на пункт, чтобы включить (✅) или выключить (⬜️):\n"
         "• <b>Авто-отклики</b> — сам откликается на вакансии\n"
         "• <b>Проходить тесты</b> — AI отвечает на вопросы/тесты работодателя\n"
+        "• <b>Писать письма через AI</b> — ИИ генерирует текст под вакансию (тратит токены)\n"
         "• <b>Сообщать о рекрутёрах</b> — уведомления о реальных ответах (приглашения, интервью)\n"
         "• <b>Благодарить за отказ</b> — авто-сообщение спасибо при отказе\n"
         "• <b>Поднимать резюме</b> — авто-поднятие резюме каждые 4 часа",

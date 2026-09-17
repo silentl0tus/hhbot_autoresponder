@@ -95,6 +95,7 @@ def settings_keyboard(is_paused: bool = False, auto_apply: bool = False) -> Inli
 _FLAG_LABELS = {
     "auto_apply": "Авто-отклики",
     "pass_tests": "Проходить тесты вакансий",
+    "ai_cover_letters": "Писать письма через AI",
     "notify_messages": "Сообщать о рекрутёрах",
     "thank_rejections": "Благодарить за отказ",
     "bump_resume": "Поднимать резюме",
