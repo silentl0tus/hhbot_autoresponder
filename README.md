@@ -1,9 +1,61 @@
-# 🤖 HH Autoresponder Bot
+<div align="center">
 
-Это Telegram-бот для автоматических откликов на вакансии hh.ru с опциональной поддержкой ИИ (Claude / Gemini / etc) для прохождения опросов и тестов работодателей.
+<svg width="800" height="200" viewBox="0 0 800 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0f0a"/>
+      <stop offset="100%" style="stop-color:#0d1f14"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#22c55e"/>
+      <stop offset="100%" style="stop-color:#4ade80"/>
+    </linearGradient>
+    <linearGradient id="accentV" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#22c55e"/>
+      <stop offset="100%" style="stop-color:#15803d"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="200" fill="url(#bg)" rx="14"/>
+  <rect x="0" y="0" width="5" height="200" fill="url(#accentV)" rx="2"/>
+  <rect x="0" y="0" width="800" height="2" fill="url(#accent)" rx="1" opacity="0.4"/>
+  <rect x="30" y="26" width="188" height="22" rx="11" fill="#22c55e18" stroke="#22c55e40" stroke-width="1"/>
+  <circle cx="46" cy="37" r="4" fill="#22c55e"/>
+  <text x="116" y="42" font-family="'Courier New', monospace" font-size="11" fill="#22c55e" text-anchor="middle" letter-spacing="1">TELEGRAM BOT · hh.ru</text>
+  <text x="30" y="98" font-family="Georgia, 'Times New Roman', serif" font-size="40" font-weight="bold" fill="#f8f8f8" letter-spacing="-1">hh-autoresponder</text>
+  <text x="30" y="128" font-family="'Courier New', monospace" font-size="13" fill="#6b7280" letter-spacing="0.5">Автоотклики на вакансии hh.ru. Бесплатно, open-source.</text>
+  <rect x="30" y="152" width="112" height="26" rx="5" fill="#12211a" stroke="#22553a" stroke-width="1"/>
+  <text x="86" y="169" font-family="'Courier New', monospace" font-size="11" fill="#7dd3a8" text-anchor="middle">авто-отклики</text>
+  <rect x="152" y="152" width="100" height="26" rx="5" fill="#12211a" stroke="#22553a" stroke-width="1"/>
+  <text x="202" y="169" font-family="'Courier New', monospace" font-size="11" fill="#7dd3a8" text-anchor="middle">Python 3.12+</text>
+  <rect x="262" y="152" width="92" height="26" rx="5" fill="#12211a" stroke="#22553a" stroke-width="1"/>
+  <text x="308" y="169" font-family="'Courier New', monospace" font-size="11" fill="#7dd3a8" text-anchor="middle">MIT лицензия</text>
+  <text x="668" y="120" font-family="Georgia, serif" font-size="72" fill="#ffffff05" font-weight="bold">hh</text>
+</svg>
 
-Основной код и более подробная документация лежат в папке `hh-autoresponder`. 
-В корневой папке лежат удобные скрипты для быстрого старта на любой ОС.
+<br/>
+
+[![License](https://img.shields.io/badge/License-MIT-22c55e?style=flat-square)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.12+-3776AB?style=flat-square&logo=python&logoColor=white)]()
+[![Version](https://img.shields.io/badge/version-1.0.0-e63946?style=flat-square)]()
+
+</div>
+
+<br/>
+
+# hh-autoresponder — бот автооткликов на вакансии hh.ru (хх ру)
+
+**Автоотклики на hh.ru на автопилоте.** Телеграм-бот сам ищет вакансии на
+**hh.ru** по вашим запросам, отбирает подходящие и **автоматически откликается**
+за вас — ровным, человеческим темпом. Бесплатный, с открытым кодом
+(open-source), запускается на вашем компьютере или сервере. Всё управление и подробный лог —
+в Telegram.
+
+Проще говоря: вы настраиваете **автоотклик на вакансии hh** один раз — и бот сам
+рассылает отклики, пока вы занимаетесь своими делами.
+
+> ⚠️ **Дисклеймер.** Автоматические отклики на вакансии нарушают правила hh.ru —
+> аккаунт могут ограничить. Держи разумные лимиты и используй на свой риск.
+> Проект — для личного использования.
 
 ---
 
@@ -18,14 +70,43 @@
 
 ---
 
+## Возможности и Управление (Кнопки бота)
+
+- 🔍 **Поиск и отбор**: Каждые 5 минут ищет вакансии на hh.ru по запросам, фильтруя их по названию, зарплате, стеку и уровню без затрат токенов нейросети.
+- 📨 **Безопасные автоотклики**: Откликается через официальный API hh с умными задержками (антибан).
+- ✉️ **Умные сопроводительные письма**: Бот может отправлять как фиксированное письмо из конфига, так и уникальные письма, сгенерированные ИИ под каждую вакансию.
+- 🎭 **Гуманизатор текста (Анти-ИИ)**: Встроенный проход, удаляющий из писем ИИ-штампы, канцеляризмы и лишнее преувеличение опыта.
+- 🧠 **Прохождение тестов**: Если у вакансии анкета или тест, бот подключает Playwright и ИИ для ответов на вопросы.
+- 💬 **Мессенджер**: Ловит ответы и приглашения от рекрутеров и присылает их прямо в Telegram.
+- ⬆️ **Автоподнятие**: Автоматически поднимает резюме в поиске hh каждые 4 часа.
+
+### Кнопки управления в Telegram
+- 🟢/⏸ **Автоотклик**: Включение и выключение автоматического поиска и рассылки откликов.
+- 📊 **Статистика**: Показывает воронку откликов (отправлено, отказы, приглашения, нет ответа).
+- ⚙️ **Настройка функций**: Включение/выключение ИИ-генерации писем, гуманизатора, ответов на тесты и автоподнятия резюме.
+
+---
+
+## Требования
+
+- **Python 3.12+**
+- Аккаунт на **hh.ru** с опубликованным резюме
+- Телеграм-бот (токен из [@BotFather](https://t.me/BotFather))
+- (опционально) ключ LLM-провайдера (любого совместимого с OpenAI API), если нужно генерировать письма, проходить тесты и использовать гуманизатор.
+- Настроенный VPN (см. предупреждение выше).
+
+База — SQLite (файл). Ни Postgres, ни Redis, ни Docker ставить не нужно.
+
+---
+
 ## 🚀 Быстрый старт (Установка и запуск)
 
-Для работы бота вам понадобится установленный **Python 3.12+**. 
+Этот репозиторий представляет собой удобную обертку для локального запуска на Windows и Linux.
 
 ### 1. Настройка
-1. Перейдите в папку `hh-autoresponder`.
-2. Скопируйте файл `.env.example` и переименуйте его в `.env`.
-3. Откройте `.env` и впишите туда ваш токен бота Telegram, ваш ID, логин и пароль от hh.ru.
+1. Скопируйте файл `hh-autoresponder/.env.example` и переименуйте его в `hh-autoresponder/.env`.
+2. Откройте `.env` и впишите туда ваш токен бота Telegram, ваш числовой ID Telegram, логин и пароль от hh.ru.
+3. Отредактируйте параметры отбора (запросы, ключевые слова, зарплаты).
 
 ### 2. Запуск на Windows 🪟
 Вам не нужно писать команды в терминале, всё автоматизировано:
@@ -57,4 +138,6 @@ chmod +x run_linux.sh login_linux.sh
 
 ---
 
-*Этот репозиторий представляет собой обертку для удобного локального запуска на Windows и Linux.*
+## Лицензия
+
+[MIT](LICENSE) © 
