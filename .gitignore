@@ -1,0 +1,41 @@
+# Секреты и локальные данные (КРИТИЧНО - не пушить в GitHub!)
+.env
+.env.*
+configs/resume.txt
+
+# Рантайм-данные (база, сессии браузера, токены)
+data/
+*.db
+*.sqlite3
+*.session
+sessions/
+browser_sessions/
+
+# Виртуальные окружения Python
+.venv/
+venv/
+env/
+.env_folder/
+
+# Кэш Python и скомпилированные файлы
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+wheels/
+
+# Логи и мусор ОС
+logs/
+*.log
+.DS_Store
+Thumbs.db
+
+# Игнорируем локальные скрипты запуска (по желанию, но лучше не тащить их в репозиторий, если они сделаны только для вас)
+# login_windows.bat
+# run_windows.bat
+# run_linux.sh
+# login_linux.sh
