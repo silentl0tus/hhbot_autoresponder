@@ -81,7 +81,8 @@ class Settings(BaseSettings):
     apply_delay_max: int = 68         # пауза между откликами, сек (верх)
     type_delay_min: int = 30
     type_delay_max: int = 120
-    max_applies_per_day_hh: int = 200  # 200 — потолок самого hh
+    max_applies_per_day_hh_min: int = 20  # 20 — низ лимита
+    max_applies_per_day_hh_max: int = 35  # 35 — верх лимита
 
     # ── База ──────────────────────────────────────────────────
     database_url: str = "sqlite+aiosqlite:///data/jobhunter.db"
@@ -111,10 +112,6 @@ class Settings(BaseSettings):
     def allowed_regions(self) -> list[str]:
         """Список разрешённых подстрок для фильтра location."""
         return _split(self.allowed_regions_raw)
-
-    @property
-    def max_applies_per_day(self) -> int:
-        return self.max_applies_per_day_hh
 
     @property
     def resume_text(self) -> str:

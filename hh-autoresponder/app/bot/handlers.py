@@ -133,7 +133,7 @@ async def btn_stats(message: Message, **kw):
     score_text = f"{avg_score:.0f}" if avg_score else "—"
 
     PLATFORMS = [
-        ("hh", "hh.ru", _scheduler.max_applies_per_day_hh if _scheduler else settings.max_applies_per_day_hh),
+        ("hh", "hh.ru", _scheduler.max_applies_per_day_hh if _scheduler else settings.max_applies_per_day_hh_max),
     ]
     by_plat_lines = []
     for code, label, cap in PLATFORMS:
@@ -156,7 +156,7 @@ async def btn_stats(message: Message, **kw):
     total_vac = sum(platform_vac.values())
     total_today = sum(app_today.values())
     total_all = sum(app_total.values())
-    total_cap = _scheduler.max_applies_per_day_hh if _scheduler else settings.max_applies_per_day_hh
+    total_cap = _scheduler.max_applies_per_day_hh if _scheduler else settings.max_applies_per_day_hh_max
 
     await message.answer(
         "📊 <b>Статистика</b>\n\n"
@@ -239,7 +239,7 @@ def _settings_text(paused: bool, auto: bool, limit: int = 0) -> str:
         f"📍 Позиция: {settings.desired_position}\n"
         f"💰 Зарплата: {settings.desired_salary_min:,}–{settings.desired_salary_max:,}\n"
         f"⏱ Интервал поиска: {settings.check_interval_sec // 60} мин\n"
-        f"🎯 Лимит откликов/день (hh.ru): <b>{limit or settings.max_applies_per_day_hh}</b>\n"
+        f"🎯 Лимит откликов/день (на сегодня): <b>{limit or settings.max_applies_per_day_hh_max}</b>\n"
         f"⏱ Задержка между откликами: {settings.apply_delay_min}–{settings.apply_delay_max} сек\n"
         f"⌨️ Скорость печати: {settings.type_delay_min}–{settings.type_delay_max} мс/символ\n"
         f"🔔 Уведомления: {settings.notify_hour_start}:00–{settings.notify_hour_end}:00 МСК\n\n"

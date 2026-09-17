@@ -52,7 +52,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
     pass_tests = True  # флаг «проходить тесты вакансий» (галочка в боте)
     ai_cover_letters = False
     humanize_letters = False
-    limit_hh_dynamic = settings.max_applies_per_day_hh
+    limit_hh_dynamic = settings.max_applies_per_day_hh_max
     try:
         import json as _json
         from pathlib import Path as _Path
@@ -64,7 +64,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
             pass_tests = _st.get("pass_tests", True)
             ai_cover_letters = _st.get("ai_cover_letters", False)
             humanize_letters = _st.get("humanize_letters", False)
-            limit_hh_dynamic = _st.get("max_applies_per_day_hh", settings.max_applies_per_day_hh)
+            limit_hh_dynamic = _st.get("max_applies_per_day_hh", settings.max_applies_per_day_hh_max)
     except Exception as e:
         log.warning("read_paused_platforms_error", error=str(e))
 

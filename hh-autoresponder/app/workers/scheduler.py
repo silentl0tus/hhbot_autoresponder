@@ -1,5 +1,6 @@
 import asyncio
 import json
+import random
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -25,7 +26,12 @@ class WorkerScheduler:
         state = self._load_state()
         self.is_paused = state.get("is_paused", False)
         self.auto_apply = state.get("auto_apply", False)
-        self.max_applies_per_day_hh = state.get("max_applies_per_day_hh", settings.max_applies_per_day_hh)
+        self.limit_generated_date = state.get("limit_generated_date", "")
+        if self.limit_generated_date == datetime.now(MSK).strftime("%Y-%m-%d"):
+            self.max_applies_per_day_hh = state.get("max_applies_per_day_hh", settings.max_applies_per_day_hh_max)
+        else:
+            self.max_applies_per_day_hh = random.randint(settings.max_applies_per_day_hh_min, settings.max_applies_per_day_hh_max)
+            self.limit_generated_date = datetime.now(MSK).strftime("%Y-%m-%d")
         # Флаги «что делает бот» (галочки в боте). По умолчанию включены.
         self.pass_tests = state.get("pass_tests", True)
         self.ai_cover_letters = state.get("ai_cover_letters", False)
@@ -70,6 +76,7 @@ class WorkerScheduler:
             state["is_paused"] = self.is_paused
             state["auto_apply"] = self.auto_apply
             state["max_applies_per_day_hh"] = self.max_applies_per_day_hh
+            state["limit_generated_date"] = self.limit_generated_date
             state["pass_tests"] = self.pass_tests
             state["ai_cover_letters"] = self.ai_cover_letters
             state["humanize_letters"] = self.humanize_letters
@@ -319,6 +326,13 @@ class WorkerScheduler:
     async def _job_apply(self):
         if self.is_paused or not self.auto_apply:
             return
+
+        today_str = datetime.now(MSK).strftime("%Y-%m-%d")
+        if self.limit_generated_date != today_str:
+            self.max_applies_per_day_hh = random.randint(settings.max_applies_per_day_hh_min, settings.max_applies_per_day_hh_max)
+            self.limit_generated_date = today_str
+            self._save_state()
+            log.info("bot_limit_daily_generated", limit=self.max_applies_per_day_hh)
         try:
             # Уведомления больше не отсылаем поминутно — статистика идёт
             # пакетом через _job_apply_summary каждые 2 часа.
