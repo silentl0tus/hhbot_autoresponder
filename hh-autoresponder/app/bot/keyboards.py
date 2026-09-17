@@ -68,7 +68,7 @@ def confirm_apply_keyboard(vacancy_id: int) -> InlineKeyboardMarkup:
     ])
 
 
-def settings_keyboard(is_paused: bool = False, auto_apply: bool = False) -> InlineKeyboardMarkup:
+def settings_keyboard(is_paused: bool = False, auto_apply: bool = False, limit: int = 0) -> InlineKeyboardMarkup:
     pause_text = "▶️ Возобновить" if is_paused else "⏸ Пауза"
     auto_text = "🟢 Авто-отклик ВКЛ" if auto_apply else "⚪ Авто-отклик ВЫКЛ"
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -82,12 +82,13 @@ def settings_keyboard(is_paused: bool = False, auto_apply: bool = False) -> Inli
         ],
         [
             InlineKeyboardButton(text="⬆️ Поднять резюме", callback_data="bump_resume"),
+            InlineKeyboardButton(text=f"📊 Лимит: {limit}", callback_data="limits_menu"),
         ],
         [
             InlineKeyboardButton(text="🧹 Очистить отклики", callback_data="clear_neg"),
         ],
         [
-            InlineKeyboardButton(text="🎛 Что делает бот", callback_data="behavior_menu"),
+            InlineKeyboardButton(text="🎛 Настройка функций", callback_data="behavior_menu"),
         ],
     ])
 
@@ -117,4 +118,21 @@ def clear_neg_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🗓 Старше 14 дней", callback_data="clearneg:old14")],
         [InlineKeyboardButton(text="🗓 Старше 30 дней", callback_data="clearneg:old30")],
         [InlineKeyboardButton(text="👀 Показать без удаления", callback_data="clearneg:dry")],
+    ])
+
+def limits_keyboard(current: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="-10", callback_data="set_limit:-10"),
+            InlineKeyboardButton(text="+10", callback_data="set_limit:+10"),
+        ],
+        [
+            InlineKeyboardButton(text="50", callback_data="set_limit:50_abs"),
+            InlineKeyboardButton(text="100", callback_data="set_limit:100_abs"),
+            InlineKeyboardButton(text="150", callback_data="set_limit:150_abs"),
+            InlineKeyboardButton(text="200", callback_data="set_limit:200_abs"),
+        ],
+        [
+            InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back"),
+        ]
     ])

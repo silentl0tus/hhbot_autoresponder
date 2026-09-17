@@ -25,6 +25,7 @@ from app.bot.keyboards import (
     settings_keyboard,
     clear_neg_keyboard,
     behavior_keyboard,
+    limits_keyboard,
 )
 
 router = Router()
@@ -132,7 +133,7 @@ async def btn_stats(message: Message, **kw):
     score_text = f"{avg_score:.0f}" if avg_score else "—"
 
     PLATFORMS = [
-        ("hh", "hh.ru", settings.max_applies_per_day_hh),
+        ("hh", "hh.ru", _scheduler.max_applies_per_day_hh if _scheduler else settings.max_applies_per_day_hh),
     ]
     by_plat_lines = []
     for code, label, cap in PLATFORMS:
@@ -155,7 +156,7 @@ async def btn_stats(message: Message, **kw):
     total_vac = sum(platform_vac.values())
     total_today = sum(app_today.values())
     total_all = sum(app_total.values())
-    total_cap = settings.max_applies_per_day_hh
+    total_cap = _scheduler.max_applies_per_day_hh if _scheduler else settings.max_applies_per_day_hh
 
     await message.answer(
         "📊 <b>Статистика</b>\n\n"
@@ -232,13 +233,13 @@ async def btn_messages(message: Message, **kw):
     await message.answer(text, parse_mode="HTML")
 
 
-def _settings_text(paused: bool, auto: bool) -> str:
+def _settings_text(paused: bool, auto: bool, limit: int = 0) -> str:
     return (
         "⚙️ <b>Настройки</b>\n\n"
         f"📍 Позиция: {settings.desired_position}\n"
         f"💰 Зарплата: {settings.desired_salary_min:,}–{settings.desired_salary_max:,}\n"
         f"⏱ Интервал поиска: {settings.check_interval_sec // 60} мин\n"
-        f"🎯 Лимит откликов/день (hh.ru): <b>{settings.max_applies_per_day_hh}</b>\n"
+        f"🎯 Лимит откликов/день (hh.ru): <b>{limit or settings.max_applies_per_day_hh}</b>\n"
         f"⏱ Задержка между откликами: {settings.apply_delay_min}–{settings.apply_delay_max} сек\n"
         f"⌨️ Скорость печати: {settings.type_delay_min}–{settings.type_delay_max} мс/символ\n"
         f"🔔 Уведомления: {settings.notify_hour_start}:00–{settings.notify_hour_end}:00 МСК\n\n"
@@ -253,10 +254,11 @@ def _settings_text(paused: bool, auto: bool) -> str:
 async def btn_settings(message: Message, **kw):
     paused = _scheduler.is_paused if _scheduler else False
     auto = _scheduler.auto_apply if _scheduler else False
+    limit = _scheduler.max_applies_per_day_hh if _scheduler else 0
     await message.answer(
-        _settings_text(paused, auto),
+        _settings_text(paused, auto, limit),
         parse_mode="HTML",
-        reply_markup=settings_keyboard(paused, auto),
+        reply_markup=settings_keyboard(paused, auto, limit),
     )
 
 
@@ -734,10 +736,11 @@ async def cb_toggle_pause(callback: CallbackQuery, **kw):
     else:
         _scheduler.pause()
         await callback.answer("⏸ На паузе")
+    limit = _scheduler.max_applies_per_day_hh if _scheduler else 0
     await callback.message.edit_text(
-        _settings_text(_scheduler.is_paused, _scheduler.auto_apply),
+        _settings_text(_scheduler.is_paused, _scheduler.auto_apply, limit),
         parse_mode="HTML",
-        reply_markup=settings_keyboard(_scheduler.is_paused, _scheduler.auto_apply),
+        reply_markup=settings_keyboard(_scheduler.is_paused, _scheduler.auto_apply, limit),
     )
 
 
@@ -750,10 +753,11 @@ async def cb_toggle_auto(callback: CallbackQuery, **kw):
     _scheduler.set_auto_apply(not _scheduler.auto_apply)
     status = "🟢 ВКЛ" if _scheduler.auto_apply else "⚪ ВЫКЛ"
     await callback.answer(f"Авто-отклик: {status}")
+    limit = _scheduler.max_applies_per_day_hh if _scheduler else 0
     await callback.message.edit_text(
-        _settings_text(_scheduler.is_paused, _scheduler.auto_apply),
+        _settings_text(_scheduler.is_paused, _scheduler.auto_apply, limit),
         parse_mode="HTML",
-        reply_markup=settings_keyboard(_scheduler.is_paused, _scheduler.auto_apply),
+        reply_markup=settings_keyboard(_scheduler.is_paused, _scheduler.auto_apply, limit),
     )
 
 
@@ -812,7 +816,7 @@ async def cb_behavior_menu(callback: CallbackQuery, **kw):
     await callback.answer()
     flags = _scheduler.get_flags() if _scheduler else dict(_BEHAVIOR_DEFAULTS)
     await callback.message.answer(
-        "🎛 <b>Что делает бот</b>\n\n"
+        "🎛 <b>Настройка функций</b>\n\n"
         "Нажми на пункт, чтобы включить (✅) или выключить (⬜️):\n"
         "• <b>Авто-отклики</b> — сам откликается на вакансии\n"
         "• <b>Проходить тесты</b> — AI отвечает на вопросы/тесты работодателя\n"
@@ -1243,3 +1247,57 @@ async def cmd_negotiations(message: Message, **kw):
             text_parts.append(f"  • {s['title'][:50]} — {s['company']}")
 
     await message.answer("\n".join(text_parts), parse_mode="HTML")
+
+@router.callback_query(F.data == "limits_menu")
+@admin_only
+async def cb_limits_menu(callback: CallbackQuery, **kw):
+    await callback.answer()
+    limit = _scheduler.max_applies_per_day_hh if _scheduler else 0
+    await callback.message.edit_text(
+        f"📊 <b>Настройка дневного лимита откликов (hh.ru)</b>\n\n"
+        f"Текущий лимит: <b>{limit}</b> в день\n\n"
+        f"Выберите новое значение из пресетов или используйте кнопки +/- для точной настройки:",
+        parse_mode="HTML",
+        reply_markup=limits_keyboard(limit),
+    )
+
+@router.callback_query(F.data.startswith("set_limit:"))
+@admin_only
+async def cb_set_limit(callback: CallbackQuery, **kw):
+    if not _scheduler:
+        await callback.answer("Scheduler не найден")
+        return
+    action = callback.data.split(":")[1]
+    current = _scheduler.max_applies_per_day_hh
+    new_limit = current
+    
+    if action == "-10":
+        new_limit = max(1, current - 10)
+    elif action == "+10":
+        new_limit = current + 10
+    elif action.endswith("_abs"):
+        new_limit = int(action.replace("_abs", ""))
+        
+    if new_limit != current:
+        _scheduler.set_max_applies(new_limit)
+        await callback.answer(f"Лимит изменён: {new_limit}")
+        await callback.message.edit_text(
+            f"📊 <b>Настройка дневного лимита откликов (hh.ru)</b>\n\n"
+            f"Текущий лимит: <b>{new_limit}</b> в день\n\n"
+            f"Выберите новое значение из пресетов или используйте кнопки +/- для точной настройки:",
+            parse_mode="HTML",
+            reply_markup=limits_keyboard(new_limit),
+        )
+    else:
+        await callback.answer("Уже установлено")
+
+@router.callback_query(F.data == "settings_back")
+@admin_only
+async def cb_settings_back(callback: CallbackQuery, **kw):
+    await callback.answer()
+    limit = _scheduler.max_applies_per_day_hh if _scheduler else 0
+    await callback.message.edit_text(
+        _settings_text(_scheduler.is_paused, _scheduler.auto_apply, limit),
+        parse_mode="HTML",
+        reply_markup=settings_keyboard(_scheduler.is_paused, _scheduler.auto_apply, limit),
+    )

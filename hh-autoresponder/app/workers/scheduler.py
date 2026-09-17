@@ -25,6 +25,7 @@ class WorkerScheduler:
         state = self._load_state()
         self.is_paused = state.get("is_paused", False)
         self.auto_apply = state.get("auto_apply", False)
+        self.max_applies_per_day_hh = state.get("max_applies_per_day_hh", settings.max_applies_per_day_hh)
         # Флаги «что делает бот» (галочки в боте). По умолчанию включены.
         self.pass_tests = state.get("pass_tests", True)
         self.ai_cover_letters = state.get("ai_cover_letters", False)
@@ -67,6 +68,7 @@ class WorkerScheduler:
             state = self._load_state()  # сохраняем прочие ключи
             state["is_paused"] = self.is_paused
             state["auto_apply"] = self.auto_apply
+            state["max_applies_per_day_hh"] = self.max_applies_per_day_hh
             state["pass_tests"] = self.pass_tests
             state["ai_cover_letters"] = self.ai_cover_letters
             state["notify_messages"] = self.notify_messages
@@ -653,6 +655,11 @@ class WorkerScheduler:
             setattr(self, name, value)
             self._save_state()
             log.info("bot_flag_set", flag=name, value=value)
+
+    def set_max_applies(self, limit: int):
+        self.max_applies_per_day_hh = max(1, limit)
+        self._save_state()
+        log.info("bot_limit_set", limit=self.max_applies_per_day_hh)
 
     def stop(self):
         self.scheduler.shutdown()
