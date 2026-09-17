@@ -131,7 +131,7 @@ async def main():
         f"Позиция: {settings.desired_position}\n"
         f"Зарплата: {settings.desired_salary_min:,}–{settings.desired_salary_max:,}\n"
         f"Интервал: {settings.check_interval_sec // 60} мин\n"
-        f"Лимит: {settings.max_applies_per_day} откликов/день\n"
+        f"Лимит: {scheduler.max_applies_per_day_hh} откликов/день\n"
         f"Режим: {'Playwright' if playwright_ok else 'API-only'}",
     )
 
