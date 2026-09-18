@@ -21,7 +21,7 @@
 graph TD
     subgraph "Фоновые процессы (Workers)"
         A((APScheduler)) -->|Раз в 5 минут| B[Vacancy Worker]
-        B -->|API Запросы| C(HH.ru API / Хабр Карьера)
+        B -->|API Запросы| C("HH.ru API / Хабр Карьера")
         C -->|Свежие вакансии| D[Rule Analyzer]
         F[Apply Worker] -->|Берет из очереди| E
     end
@@ -33,7 +33,7 @@ graph TD
     subgraph "Процесс отклика (Apply)"
         F --> G{Нужно ли проходить тест/анкету?}
         
-        G -->|Нет| H[Быстрый отклик по API (HH / Хабр)]
+        G -->|Нет| H["Быстрый отклик по API (HH / Хабр)"]
         
         G -->|Да| I[Запуск браузера Playwright]
         I --> J{Включен ли AI?}
