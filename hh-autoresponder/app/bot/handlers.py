@@ -64,7 +64,7 @@ def _company_name(vacancy) -> str:
 @admin_only
 async def cmd_start(message: Message, **kw):
     await message.answer(
-        "👋 <b>Job Hunter Bot</b>\n\n"
+        "👋 <b>Job Hunter Bot v1.1</b>\n\n"
         "Автоматический поиск вакансий и отклики на hh.ru\n"
         "Используй кнопки ниже 👇",
         parse_mode="HTML",
