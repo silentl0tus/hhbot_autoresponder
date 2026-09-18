@@ -6,7 +6,7 @@ from app.models.base import Base
 
 # Устанавливаем переменные окружения ДО импорта настроек
 os.environ["BOT_TOKEN"] = "test:token"
-os.environ["TELEGRAM_CHAT_ID"] = "12345"
+os.environ["TG_ADMIN_CHAT_ID"] = "12345"
 
 @pytest_asyncio.fixture
 async def db_session():
@@ -24,3 +24,25 @@ async def db_session():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
+
+from unittest.mock import AsyncMock, MagicMock
+from aiogram.types import Message, Chat
+from app.config import settings
+
+@pytest.fixture
+def mock_message(mocker):
+    """Создает мок объекта Message от лица администратора."""
+    msg = AsyncMock(spec=Message)
+    msg.chat = MagicMock(spec=Chat)
+    msg.chat.id = int(settings.tg_admin_chat_id) if settings.tg_admin_chat_id else 12345
+    msg.answer = AsyncMock()
+    return msg
+
+@pytest.fixture
+def mock_unauth_message(mocker):
+    """Создает мок объекта Message от лица чужого пользователя."""
+    msg = AsyncMock(spec=Message)
+    msg.chat = MagicMock(spec=Chat)
+    msg.chat.id = 999999999
+    msg.answer = AsyncMock()
+    return msg
