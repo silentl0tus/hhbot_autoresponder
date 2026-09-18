@@ -68,13 +68,22 @@ def confirm_apply_keyboard(vacancy_id: int) -> InlineKeyboardMarkup:
     ])
 
 
-def settings_keyboard(is_paused: bool = False, auto_apply: bool = False, limit: int = 0) -> InlineKeyboardMarkup:
-    pause_text = "▶️ Возобновить" if is_paused else "⏸ Пауза"
+def settings_keyboard(is_paused: bool = False, auto_apply: bool = False, limit: int = 0, paused_platforms: set = None) -> InlineKeyboardMarkup:
+    pause_text = "▶️ Возобновить" if is_paused else "⏸ Пауза (все)"
     auto_text = "🟢 Авто-отклик ВКЛ" if auto_apply else "⚪ Авто-отклик ВЫКЛ"
+    
+    paused_platforms = paused_platforms or set()
+    hh_text = "🔴 hh.ru (выкл)" if "hh" in paused_platforms else "🟢 hh.ru (вкл)"
+    habr_text = "🔴 Хабр (выкл)" if "habr" in paused_platforms else "🟢 Хабр (вкл)"
+    
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text=pause_text, callback_data="toggle_pause"),
             InlineKeyboardButton(text=auto_text, callback_data="toggle_auto"),
+        ],
+        [
+            InlineKeyboardButton(text=hh_text, callback_data="toggle_plat:hh"),
+            InlineKeyboardButton(text=habr_text, callback_data="toggle_plat:habr"),
         ],
         [
             InlineKeyboardButton(text="🔄 Искать сейчас", callback_data="force_search"),

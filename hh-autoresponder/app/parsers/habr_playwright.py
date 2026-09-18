@@ -60,4 +60,59 @@ class HabrPlaywright:
                 
         return False
 
+    async def check_messages(self) -> list[dict]:
+        if not HABR_STATE_PATH.exists():
+            return []
+
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            try:
+                context = await browser.new_context(storage_state=HABR_STATE_PATH)
+                page = await context.new_page()
+                
+                await page.goto("https://career.habr.com/conversations")
+                await random_delay(2, 4)
+                
+                try:
+                    # Подождем загрузки списка чатов (может называться .conversation, .chat-item, или просто ссылки)
+                    await page.wait_for_selector("a[href*='/conversations/']", timeout=10000)
+                except PlaywrightTimeout:
+                    log.info("habr_no_messages_found")
+                    return []
+                
+                # Собираем все ссылки на чаты
+                conv_links = await page.locator("a[href*='/conversations/']").all()
+                results = []
+                for link in conv_links:
+                    text = await link.inner_text()
+                    lines = [line.strip() for line in text.split('\n') if line.strip()]
+                    if not lines:
+                        continue
+                        
+                    # Эвристика: первая строка обычно компания/рекрутер, вторая - должность, остальное текст
+                    company = lines[0] if len(lines) > 0 else "Unknown"
+                    title = lines[1] if len(lines) > 1 else ""
+                    msg_text = "\n".join(lines[2:]) if len(lines) > 2 else "Нет текста"
+                    
+                    href = await link.get_attribute("href")
+                    thread_id = href.split('/')[-1] if href else "unknown"
+                    
+                    results.append({
+                        "platform": "habr",
+                        "sender": company,
+                        "company": company,
+                        "title": title,
+                        "text": msg_text,
+                        "status": "уведомление", # дефолтный статус
+                        "thread_id": thread_id,
+                        "external_id": thread_id
+                    })
+                    
+                return results
+            except Exception as e:
+                log.error("habr_check_messages_error", error=str(e))
+                return []
+            finally:
+                await browser.close()
+
 habr_playwright = HabrPlaywright()

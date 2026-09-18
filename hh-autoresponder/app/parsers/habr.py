@@ -126,7 +126,12 @@ class HabrParser(BaseParser):
             return None
 
     async def check_messages(self) -> list[dict]:
-        return []
+        try:
+            from app.parsers.habr_playwright import habr_playwright
+            return await habr_playwright.check_messages()
+        except ImportError:
+            log.warning("habr_check_msgs_not_supported", reason="playwright not available")
+            return []
 
     async def apply_to_vacancy(self, url: str, cover_letter: str, screenshot_name: str | None = None) -> bool:
         """Apply via Playwright if available, otherwise skip."""

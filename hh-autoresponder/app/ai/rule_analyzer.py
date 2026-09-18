@@ -123,7 +123,11 @@ def analyze_vacancy(
         score += 15
     elif is_senior and not is_middle:
         seniority = "senior"
-        score += 5
+        return {
+            "score": 0, "reason": "Отказ (Senior уровень)",
+            "is_relevant": False, "seniority": "senior",
+            "red_flags": ["senior_level"], "stack_match": 0,
+        }
     elif is_middle:
         score += 10
 

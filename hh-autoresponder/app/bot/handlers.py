@@ -228,7 +228,32 @@ async def btn_messages(message: Message, **kw):
     if len(invites) > 25:
         lines.append(f"…и ещё {len(invites) - 25}. Полная переписка — в чатах на hh.ru.")
 
-    text = "\n".join(lines)
+    # Подгружаем последние сообщения с Хабра из локальной БД
+    from app.database import async_session
+    from app.models.message import RecruiterMessage
+    from sqlalchemy import select, desc
+    
+    habr_lines = []
+    try:
+        async with async_session() as session:
+            recent_habr = await session.scalars(
+                select(RecruiterMessage)
+                .where(RecruiterMessage.platform == "habr")
+                .order_by(desc(RecruiterMessage.created_at))
+                .limit(10)
+            )
+            recent_habr = recent_habr.all()
+            
+            if recent_habr:
+                habr_lines.append("\n🔵 <b>Хабр Карьера (последние сообщения):</b>")
+                for m in recent_habr:
+                    company = _html.escape(m.sender_company or m.sender_name or "Неизвестно")
+                    text = _html.escape((m.text or "").replace("\n", " ")[:100])
+                    habr_lines.append(f"• <b>{company}</b>: {text}...")
+    except Exception as e:
+        log.warning("habr_messages_fetch_error", error=str(e))
+
+    text = "\n".join(lines + habr_lines)
     if len(text) > 3900:
         text = text[:3900] + "\n…"
     await message.answer(text, parse_mode="HTML")
@@ -256,10 +281,11 @@ async def btn_settings(message: Message, **kw):
     paused = _scheduler.is_paused if _scheduler else False
     auto = _scheduler.auto_apply if _scheduler else False
     limit = _scheduler.max_applies_per_day_hh if _scheduler else 0
+    plats = _scheduler.manual_paused_platforms if _scheduler else set()
     await message.answer(
         _settings_text(paused, auto, limit),
         parse_mode="HTML",
-        reply_markup=settings_keyboard(paused, auto, limit),
+        reply_markup=settings_keyboard(paused, auto, limit, plats),
     )
 
 
@@ -739,10 +765,35 @@ async def cb_toggle_pause(callback: CallbackQuery, **kw):
         _scheduler.pause()
         await callback.answer("⏸ На паузе")
     limit = _scheduler.max_applies_per_day_hh if _scheduler else 0
+    plats = _scheduler.manual_paused_platforms if _scheduler else set()
     await callback.message.edit_text(
         _settings_text(_scheduler.is_paused, _scheduler.auto_apply, limit),
         parse_mode="HTML",
-        reply_markup=settings_keyboard(_scheduler.is_paused, _scheduler.auto_apply, limit),
+        reply_markup=settings_keyboard(_scheduler.is_paused, _scheduler.auto_apply, limit, plats),
+    )
+
+
+@router.callback_query(F.data.startswith("toggle_plat:"))
+@admin_only
+async def cb_toggle_plat(callback: CallbackQuery, **kw):
+    if not _scheduler:
+        await callback.answer("Scheduler не найден")
+        return
+    plat = callback.data.split(":")[1]
+    
+    if plat in _scheduler.manual_paused_platforms:
+        _scheduler.manual_paused_platforms.remove(plat)
+        await callback.answer(f"▶️ Платформа {plat} включена")
+    else:
+        _scheduler.manual_paused_platforms.add(plat)
+        await callback.answer(f"⏸ Платформа {plat} отключена")
+        
+    _scheduler._save_state()
+    
+    limit = _scheduler.max_applies_per_day_hh if _scheduler else 0
+    plats = _scheduler.manual_paused_platforms
+    await callback.message.edit_reply_markup(
+        reply_markup=settings_keyboard(_scheduler.is_paused, _scheduler.auto_apply, limit, plats)
     )
 
 

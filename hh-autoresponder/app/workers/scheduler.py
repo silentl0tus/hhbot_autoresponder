@@ -329,6 +329,9 @@ class WorkerScheduler:
     async def _job_apply(self):
         if self.is_paused or not self.auto_apply:
             return
+            
+        if self._is_quiet_hours():
+            return
 
         today_str = datetime.now(MSK).strftime("%Y-%m-%d")
         if self.limit_generated_date != today_str:
@@ -345,6 +348,9 @@ class WorkerScheduler:
 
     async def _job_bump_resume(self):
         if self.is_paused or not self.bump_resume:
+            return
+            
+        if self._is_quiet_hours():
             return
         try:
             from app.parsers.hh_playwright import hh_playwright
