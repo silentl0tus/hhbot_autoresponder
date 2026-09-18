@@ -53,6 +53,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
     ai_cover_letters = False
     humanize_letters = False
     limit_hh_dynamic = settings.max_applies_per_day_hh_max
+    limit_habr_dynamic = settings.max_applies_per_day_habr_max
     try:
         import json as _json
         from pathlib import Path as _Path
@@ -65,6 +66,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
             ai_cover_letters = _st.get("ai_cover_letters", False)
             humanize_letters = _st.get("humanize_letters", False)
             limit_hh_dynamic = _st.get("max_applies_per_day_hh", settings.max_applies_per_day_hh_max)
+            limit_habr_dynamic = _st.get("max_applies_per_day_habr", settings.max_applies_per_day_habr_max)
     except Exception as e:
         log.warning("read_paused_platforms_error", error=str(e))
 
@@ -90,9 +92,10 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
     effective_min_score = 1 if _is_daytime else 50
     log.info("apply_window", daytime=_is_daytime, min_score=effective_min_score)
 
-    # Дневной лимит (только hh)
+    # Дневной лимит (hh и habr)
     platform_caps = {
         "hh": limit_hh_dynamic,
+        "habr": limit_habr_dynamic,
     }
     # Платформы на паузе исключаем целиком
     for p in list(platform_caps.keys()):
@@ -235,7 +238,18 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
                 except asyncio.TimeoutError:
                     log.error("hh_oauth_timeout", vacancy_id=vacancy.id)
                     result = False
-
+            elif vacancy.platform == "habr":
+                from app.parsers.habr import HabrParser
+                parser = HabrParser()
+                try:
+                    result = await asyncio.wait_for(
+                        parser.apply_to_vacancy(vacancy.url, letter),
+                        timeout=300,
+                    )
+                except asyncio.TimeoutError:
+                    log.error("habr_apply_timeout", vacancy_id=vacancy.id)
+                    result = False
+                    
             if skip_record:
                 # Глобальная ошибка платформы — не пишем фейк-FAILED, идём дальше.
                 # Цикл пропустит остальные вакансии этой платформы через aborted_platforms.

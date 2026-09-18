@@ -29,8 +29,10 @@ class WorkerScheduler:
         self.limit_generated_date = state.get("limit_generated_date", "")
         if self.limit_generated_date == datetime.now(MSK).strftime("%Y-%m-%d"):
             self.max_applies_per_day_hh = state.get("max_applies_per_day_hh", settings.max_applies_per_day_hh_max)
+            self.max_applies_per_day_habr = state.get("max_applies_per_day_habr", settings.max_applies_per_day_habr_max)
         else:
             self.max_applies_per_day_hh = random.randint(settings.max_applies_per_day_hh_min, settings.max_applies_per_day_hh_max)
+            self.max_applies_per_day_habr = random.randint(settings.max_applies_per_day_habr_min, settings.max_applies_per_day_habr_max)
             self.limit_generated_date = datetime.now(MSK).strftime("%Y-%m-%d")
         # Флаги «что делает бот» (галочки в боте). По умолчанию включены.
         self.pass_tests = state.get("pass_tests", True)
@@ -76,6 +78,7 @@ class WorkerScheduler:
             state["is_paused"] = self.is_paused
             state["auto_apply"] = self.auto_apply
             state["max_applies_per_day_hh"] = self.max_applies_per_day_hh
+            state["max_applies_per_day_habr"] = getattr(self, "max_applies_per_day_habr", settings.max_applies_per_day_habr_max)
             state["limit_generated_date"] = self.limit_generated_date
             state["pass_tests"] = self.pass_tests
             state["ai_cover_letters"] = self.ai_cover_letters

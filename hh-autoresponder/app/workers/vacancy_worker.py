@@ -12,6 +12,7 @@ from app.models.company import Company
 from app.models.blacklist import Blacklist
 from app.parsers.base import ParsedVacancy
 from app.parsers.hh import HHParser
+from app.parsers.habr import HabrParser
 from app.ai.rule_analyzer import analyze_vacancy as rule_analyze
 from app.utils.anti_detect import random_delay
 
@@ -22,8 +23,7 @@ SEARCH_QUERIES = settings.search_queries
 
 
 def _build_parsers() -> dict:
-    """Активные площадки. В паблик-версии — только hh.ru."""
-    return {"hh": HHParser()}
+    return {"hh": HHParser(), "habr": HabrParser()}
 
 
 PARSERS = _build_parsers()
@@ -246,6 +246,11 @@ async def run_vacancy_analysis():
             skills_str = vacancy.skills or ""
             if pre_score > 0 and not description and vacancy.url:
                 try:
+                    detail_parser = PARSERS.get(vacancy.platform)
+                    if not detail_parser:
+                        log.warning("no_parser_for_platform", platform=vacancy.platform)
+                        continue
+
                     details = await detail_parser.get_vacancy_details(vacancy.url)
                     if details:
                         description = details.description or ""

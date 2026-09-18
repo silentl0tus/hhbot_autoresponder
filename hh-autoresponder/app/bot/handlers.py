@@ -134,6 +134,7 @@ async def btn_stats(message: Message, **kw):
 
     PLATFORMS = [
         ("hh", "hh.ru", _scheduler.max_applies_per_day_hh if _scheduler else settings.max_applies_per_day_hh_max),
+        ("habr", "Хабр Карьера", getattr(_scheduler, "max_applies_per_day_habr", settings.max_applies_per_day_habr_max) if _scheduler else settings.max_applies_per_day_habr_max),
     ]
     by_plat_lines = []
     for code, label, cap in PLATFORMS:
@@ -156,7 +157,7 @@ async def btn_stats(message: Message, **kw):
     total_vac = sum(platform_vac.values())
     total_today = sum(app_today.values())
     total_all = sum(app_total.values())
-    total_cap = _scheduler.max_applies_per_day_hh if _scheduler else settings.max_applies_per_day_hh_max
+    total_cap = sum([cap for _, _, cap in PLATFORMS])
 
     await message.answer(
         "📊 <b>Статистика</b>\n\n"

@@ -5,6 +5,7 @@ from app.database import async_session
 from app.models.message import RecruiterMessage
 from app.models.vacancy import Vacancy
 from app.parsers.hh import HHParser
+from app.parsers.habr import HabrParser
 from app.ai.claude import claude_ai
 from app.utils.anti_detect import random_delay
 
@@ -12,7 +13,7 @@ log = structlog.get_logger()
 
 
 def _build_parsers() -> dict:
-    return {"hh": HHParser()}
+    return {"hh": HHParser(), "habr": HabrParser()}
 
 
 PARSERS = _build_parsers()

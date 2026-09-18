@@ -83,6 +83,12 @@ class Settings(BaseSettings):
     type_delay_max: int = 120
     max_applies_per_day_hh_min: int = 20  # 20 — низ лимита
     max_applies_per_day_hh_max: int = 35  # 35 — верх лимита
+    
+    # Хабр Карьера
+    habr_login: str = ""
+    habr_password: str = ""
+    max_applies_per_day_habr_min: int = 5
+    max_applies_per_day_habr_max: int = 15
 
     # ── База ──────────────────────────────────────────────────
     database_url: str = "sqlite+aiosqlite:///data/jobhunter.db"
