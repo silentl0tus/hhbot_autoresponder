@@ -1,53 +1,117 @@
-# 🏗 Architecture & Context (For AI Agents & Developers)
+# 🏗 Архитектура и Устройство проекта (Как всё работает)
 
-> **Goal:** High-density context for LLM agents to understand the codebase without burning tokens on reading all files.
+Этот документ объединяет техническую архитектуру и описание бизнес-логики бота. Он поможет разработчикам и энтузиастам быстро понять, как проект устроен "под капотом".
 
-## 📌 Tech Stack
-- **Language:** Python 3.12+ (AsyncIO heavy)
+## 📌 Технологический стек
+- **Язык:** Python 3.12+ (активное использование AsyncIO)
 - **Telegram UI:** `aiogram` (v3+)
-- **Scraping / Automation:** `playwright` (for interactive questionnaires), `beautifulsoup4`, `httpx` (for HH API)
-- **Database:** `sqlalchemy[asyncio]` + `aiosqlite` (SQLite)
-- **Task Scheduling:** `apscheduler`
-- **Config & Validation:** `pydantic`, `pydantic-settings`
-- **AI Integration:** Direct HTTP requests via `httpx` to OpenAI-compatible endpoints (Claude/Gemini/etc).
+- **Парсинг и Автоматизация:** `playwright` (для сложных анкет), `beautifulsoup4`, `httpx` (для работы с API HH)
+- **База данных:** `sqlalchemy[asyncio]` + `aiosqlite` (легковесная локальная SQLite)
+- **Фоновые задачи:** `apscheduler`
+- **Конфигурация:** `pydantic`, `pydantic-settings`
+- **AI Интеграция:** Прямые HTTP-запросы через `httpx` к API, совместимым с OpenAI (Claude, Gemini и др.).
 
-## 📂 Project Structure (`hh-autoresponder/app/`)
+---
 
-* **`main.py`** — Entry point. Initializes the database, starts the APScheduler, and launches the Aiogram polling.
-* **`config.py`** — Loads `.env` using Pydantic Settings.
-* **`database.py`** — SQLAlchemy async engine and sessionmaker setup.
-* **`models/`** — SQLAlchemy ORM models:
-  - `vacancy.py` (stores parsed vacancies and their scores)
-  - `application.py` (tracks apply status and history)
-  - `session.py` (stores cookies/tokens for HH auth)
-* **`bot/`** — Telegram bot layer:
-  - `handlers.py` (Message routers, `/start`, UI buttons to toggle auto-responder)
-  - `keyboards.py` (Inline/Reply keyboards)
-* **`parsers/`** — Core interaction with hh.ru:
-  - `hh_api.py` (Fast search and standard applies via reverse-engineered mobile API)
-  - `hh_playwright.py` (Heavy lifting: handles complex questionnaires, cover letters, and tests via headless browser)
-  - `hh_login.py` / `manual_login.py` (Handles initial auth and session saving)
-* **`workers/`** — Background business logic (orchestrated by APScheduler):
-  - `scheduler.py` (Cron jobs config)
-  - `vacancy_worker.py` (Fetches new vacancies periodically)
-  - `apply_worker.py` (Picks up pending vacancies and attempts to apply)
-* **`ai/`** — Intelligence layer:
-  - `rule_analyzer.py` (Rule-based scoring: TARGET, NEGATIVE, and STACK keyword matching without using LLM tokens)
-  - `claude.py` (LLM client for dynamic questionnaire answering and sentiment analysis)
-  - `prompts.py` (System prompts)
-* **`utils/`** — Helpers (anti-detect for playwright, rate limiters, notifications).
+## 🗺️ Схема работы (Workflow)
 
-## 🔄 Core Workflow
+Ниже представлена наглядная схема того, как данные проходят через систему от момента поиска до отправки отклика.
 
-1. **Scheduling:** `APScheduler` triggers `vacancy_worker` every `CHECK_INTERVAL_SEC`.
-2. **Fetching:** `vacancy_worker` calls `hh_api` to fetch vacancies matching `SEARCH_QUERIES_RAW`.
-3. **Scoring:** Vacancies are passed to `rule_analyzer`. If title contains negative keywords -> rejected. If it contains target keywords -> accepted. Stack keywords increase the score.
-4. **Queueing:** Passed vacancies are saved to SQLite.
-5. **Applying:** `apply_worker` processes the queue. It first tries `hh_api` for a fast 1-click apply.
-6. **Fallback (Complex Applies):** If HH requires a test/questionnaire, `hh_playwright` takes over. It launches a headless browser, injects saved cookies, parses the DOM for questions, calls `ai/claude.py` to generate answers based on `resume.txt`, and submits the form.
-7. **Notification:** Success/Fail statuses are pushed to the Telegram admin via `bot.handlers`.
+```mermaid
+graph TD
+    subgraph "Фоновые процессы (Workers)"
+        A((APScheduler)) -->|Раз в 5 минут| B[Vacancy Worker]
+        B -->|API Запросы| C(HH.ru API)
+        C -->|Свежие вакансии| D[Rule Analyzer]
+        F[Apply Worker] -->|Берет из очереди| E
+    end
 
-## 🧠 LLM Usage Strategy
-LLMs are **NOT** used for searching or basic filtering (to save money and increase speed). Filtering is purely deterministic (`rule_analyzer`). LLMs are invoked strictly for:
-1. Answering mandatory open-ended questions in employer tests.
-2. Generating context-aware responses if a recruiter replies in the HH chat.
+    subgraph "База данных"
+        D -->|Сохраняет прошедшие фильтр| E[(SQLite: Очередь вакансий)]
+    end
+
+    subgraph "Процесс отклика (Apply)"
+        F --> G{Нужно ли проходить тест/анкету?}
+        
+        G -->|Нет| H[Быстрый отклик по API HH]
+        
+        G -->|Да| I[Запуск браузера Playwright]
+        I --> J{Включен ли AI?}
+        
+        J -->|Да| K[LLM генерирует ответы на основе резюме]
+        J -->|Нет| L[Сброс / Отмена отклика]
+        
+        K --> M[Браузер заполняет форму и жмет 'Отправить']
+    end
+
+    subgraph "Уведомления"
+        H --> N[Telegram Бот]
+        M --> N
+        N -->|Пуш-уведомление| O((Пользователь))
+    end
+```
+
+---
+
+## 📂 Структура проекта (`hh-autoresponder/app/`)
+
+Проект разделен на логические модули:
+
+* **`main.py`** — Точка входа. Инициализирует БД, запускает планировщик `APScheduler` и Telegram-бота.
+* **`config.py`** — Загрузка настроек из `.env` с помощью `pydantic-settings`.
+* **`database.py`** — Настройка асинхронного движка SQLAlchemy.
+* **`models/`** — ORM модели:
+  - `vacancy.py` (сохраненные вакансии и их баллы)
+  - `application.py` (история и статусы откликов)
+  - `session.py` (хранение cookies/токенов для HH)
+* **`bot/`** — Интерфейс Telegram:
+  - `handlers.py` (роутеры сообщений, команды `/start`, кнопки управления)
+  - `keyboards.py` (inline/reply клавиатуры)
+* **`parsers/`** — Ядро взаимодействия с hh.ru:
+  - `hh_api.py` (быстрый поиск и отклики через реверс-инжиниринг мобильного API)
+  - `hh_playwright.py` (тяжелая работа: обработка сложных анкет, сопроводительных писем и тестов через headless-браузер)
+  - `hh_login.py` / `manual_login.py` (первичная авторизация и сохранение сессии)
+* **`workers/`** — Фоновая бизнес-логика (управляется `APScheduler`):
+  - `scheduler.py` (настройка cron-задач)
+  - `vacancy_worker.py` (периодический сбор новых вакансий)
+  - `apply_worker.py` (обработка очереди вакансий и попытки отклика)
+* **`ai/`** — Интеллектуальный слой:
+  - `rule_analyzer.py` (оценка по правилам: поиск целевых и стоп-слов без траты токенов LLM)
+  - `claude.py` (клиент LLM для динамических ответов на анкеты)
+* **`utils/`** — Вспомогательные функции (анти-детект браузера, уведомления).
+
+---
+
+## 🏗️ Разбор ключевых компонентов
+
+### 1. `Vacancy Worker` (Ищейка)
+Фоновая задача, запускаемая каждые несколько минут. Она имитирует обычный поиск на `hh.ru` по вашим запросам (`SEARCH_QUERIES_RAW`).
+*Главная фишка:* Использует мобильное API hh.ru, поэтому парсинг работает мгновенно и без капчи.
+
+### 2. `Rule Analyzer` (Фильтр)
+Новые вакансии пропускаются через ваши правила (без использования AI, что экономит токены):
+- **Черный список (`NEGATIVE_KEYWORDS`)**: Вакансии со стоп-словами сразу отбрасываются.
+- **Белый список (`TARGET_KEYWORDS`)**: При наличии целевых слов вакансия проходит первичный фильтр.
+- **Оценка стека (`STACK_KEYWORDS`)**: Читается описание вакансии. За каждое совпадение навыков начисляются баллы (чем больше, тем выше приоритет в очереди).
+
+### 3. База данных (SQLite)
+Все подходящие вакансии сохраняются в SQLite, чтобы:
+- Избежать дублирования откликов.
+- Гарантировать сохранение состояния при перезапуске бота.
+
+### 4. `Apply Worker` (Откликатор)
+Второй фоновый процесс, который берет вакансии из БД по одной (соблюдая лимиты и имитируя человека):
+- В большинстве случаев используется мгновенный отклик по API.
+- Если требуется анкета/тест, задача передается Playwright.
+
+### 5. `Playwright` + ИИ (Обработчик анкет)
+Если API возвращает ошибку о необходимости прохождения теста:
+1. Запускается невидимый (headless) браузер с сохраненными cookies.
+2. Бот заходит на страницу отклика и парсит вопросы работодателя.
+3. Вопросы отправляются в ИИ вместе с вашим текстовым резюме (`resume.txt`).
+4. ИИ генерирует релевантные ответы, браузер заполняет текстовые поля и отправляет форму.
+
+### 6. Стратегия использования LLM
+LLM **НЕ** используются для поиска и базовой фильтрации (это делается детерминированно в `rule_analyzer`). LLM применяется строго для:
+1. Ответов на открытые вопросы в анкетах работодателей.
+2. Генерации осмысленных сопроводительных писем под конкретную вакансию.

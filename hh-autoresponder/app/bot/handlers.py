@@ -1,5 +1,6 @@
 import json
 import functools
+import structlog
 
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -29,6 +30,7 @@ from app.bot.keyboards import (
 )
 
 router = Router()
+log = structlog.get_logger()
 
 PAGE_SIZE = 5
 
@@ -260,18 +262,19 @@ async def btn_messages(message: Message, **kw):
 
 
 def _settings_text(paused: bool, auto: bool, limit: int = 0) -> str:
-    return (
-        "⚙️ <b>Настройки</b>\n\n"
-        f"📍 Позиция: {settings.desired_position}\n"
-        f"💰 Зарплата: {settings.desired_salary_min:,}–{settings.desired_salary_max:,}\n"
-        f"⏱ Интервал поиска: {settings.check_interval_sec // 60} мин\n"
-        f"🎯 Лимит откликов/день (на сегодня): <b>{limit or settings.max_applies_per_day_hh_max}</b>\n"
-        f"⏱ Задержка между откликами: {settings.apply_delay_min}–{settings.apply_delay_max} сек\n"
-        f"⌨️ Скорость печати: {settings.type_delay_min}–{settings.type_delay_max} мс/символ\n"
-        f"🔔 Уведомления: {settings.notify_hour_start}:00–{settings.notify_hour_end}:00 МСК\n\n"
-        f"{'⏸ Пауза' if paused else '▶️ Работает'} | "
-        f"{'🟢 Авто-отклик ВКЛ' if auto else '⚪ Авто-отклик ВЫКЛ'}"
-    )
+    status_pause = "⏸ Пауза" if paused else "▶️ Работает"
+    status_auto = "🟢 Авто-отклик ВКЛ" if auto else "⚪ Авто-отклик ВЫКЛ"
+    return f"""⚙️ <b>Настройки</b>
+
+📍 Позиция: {settings.desired_position}
+💰 Зарплата: {settings.desired_salary_min:,}–{settings.desired_salary_max:,}
+⏱ Интервал поиска: {settings.check_interval_sec // 60} мин
+🎯 Лимит откликов/день (на сегодня): <b>{limit or settings.max_applies_per_day_hh_max}</b>
+⏱ Задержка между откликами: {settings.apply_delay_min}–{settings.apply_delay_max} сек
+⌨️ Скорость печати: {settings.type_delay_min}–{settings.type_delay_max} мс/символ
+🔔 Уведомления: {settings.notify_hour_start}:00–{settings.notify_hour_end}:00 МСК
+
+{status_pause} | {status_auto}"""
 
 
 @router.message(F.text == "⚙️ Настройки")
