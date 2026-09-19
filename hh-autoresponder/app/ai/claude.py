@@ -33,11 +33,15 @@ class ClaudeAI:
     """
 
     def __init__(self):
-        self._client = httpx.AsyncClient(
-            base_url=settings.llm_base_url.rstrip("/"),
-            headers={"Authorization": f"Bearer {settings.llm_api_key}"},
-            timeout=httpx.Timeout(120.0),
-        )
+        client_kwargs = {
+            "base_url": settings.llm_base_url.rstrip("/"),
+            "headers": {"Authorization": f"Bearer {settings.llm_api_key}"},
+            "timeout": httpx.Timeout(120.0),
+        }
+        proxy = settings.llm_proxy or settings.proxy_url
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        self._client = httpx.AsyncClient(**client_kwargs)
         self._floor = settings.llm_max_tokens_floor
         self.last_error: str | None = None
 
