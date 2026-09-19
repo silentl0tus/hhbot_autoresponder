@@ -234,7 +234,7 @@ class ClaudeAI:
         question: str,
         vacancy_context: str = "",
         history: str = "",
-        humanize: bool = True,
+        humanize: bool = False,
     ) -> tuple[str, int, int]:
         """Генерирует емкий и точный ответ соискателя на вопрос-скринер рекрутера."""
         if not _ai_ready():
