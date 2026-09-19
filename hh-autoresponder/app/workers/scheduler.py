@@ -42,7 +42,11 @@ class WorkerScheduler:
         self.thank_rejections = state.get("thank_rejections", True)
         self.bump_resume = state.get("bump_resume", True)
         if "selected_llm_model" in state:
-            settings.llm_model = state["selected_llm_model"]
+            saved_model = state["selected_llm_model"]
+            if "openrouter" in settings.llm_base_url and "gemini" in saved_model:
+                settings.llm_model = "deepseek/deepseek-v4-flash-0731:free"
+            else:
+                settings.llm_model = saved_model
         self.min_ai_score = 30
         self.notify = notify_callback  # async fn(text) -> sends to TG
 

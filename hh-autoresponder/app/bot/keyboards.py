@@ -148,14 +148,20 @@ def limits_keyboard(current: int) -> InlineKeyboardMarkup:
     ])
 
 
-KNOWN_MODELS = [
+GEMINI_MODELS = [
     ("gemini-3.6-flash", "⚡️ gemini-3.6-flash (Основная)"),
     ("gemini-3.8-flash", "🚀 gemini-3.8-flash (Новейшая)"),
     ("gemini-3.5-flash", "🔹 gemini-3.5-flash (Быстрая)"),
 ]
 
+OPENROUTER_MODELS = [
+    ("deepseek/deepseek-v4-flash-0731:free", "⚡️ DeepSeek v4 Flash (100% Free)"),
+]
 
-def ai_models_keyboard(current_model: str, ai_enabled: bool = True) -> InlineKeyboardMarkup:
+KNOWN_MODELS = GEMINI_MODELS
+
+
+def ai_models_keyboard(current_model: str, ai_enabled: bool = True, is_openrouter: bool = False) -> InlineKeyboardMarkup:
     """Клавиатура для полного управления AI: выбор моделей, пресеты, смена ключей и прокси."""
     rows = []
     toggle_text = "🔴 Выключить AI" if ai_enabled else "🟢 Включить AI"
@@ -164,8 +170,8 @@ def ai_models_keyboard(current_model: str, ai_enabled: bool = True) -> InlineKey
         InlineKeyboardButton(text="⚡️ Тест связи с AI", callback_data="ai_test_conn"),
     ])
 
-    # Быстрый выбор популярных моделей
-    for model_id, label in KNOWN_MODELS:
+    models_list = OPENROUTER_MODELS if is_openrouter else GEMINI_MODELS
+    for model_id, label in models_list:
         mark = "✅ " if current_model == model_id else ""
         rows.append([InlineKeyboardButton(text=f"{mark}{label}", callback_data=f"set_model:{model_id}")])
     
