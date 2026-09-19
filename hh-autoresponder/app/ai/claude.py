@@ -111,7 +111,10 @@ class ClaudeAI:
             return "", 0, 0
 
         choice = (data.get("choices") or [{}])[0]
-        text = (choice.get("message") or {}).get("content") or ""
+        msg = choice.get("message") or {}
+        text = msg.get("content") or ""
+        if not text and msg.get("reasoning"):
+            text = msg.get("reasoning")
         usage = data.get("usage") or {}
         return text, int(usage.get("prompt_tokens", 0) or 0), int(usage.get("completion_tokens", 0) or 0)
 
