@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "deepseek/deepseek-v4-flash"
     llm_max_tokens_floor: int = 2000
+    llm_proxy: str = ""                                 # socks5:// или http:// прокси для LLM (опц.)
 
     # ── hh.ru ─────────────────────────────────────────────────
     hh_login: str = ""
