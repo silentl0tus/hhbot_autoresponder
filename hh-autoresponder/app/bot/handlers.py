@@ -1783,7 +1783,7 @@ async def cb_screener_menu(callback: CallbackQuery, **kw):
 async def _screener_background_monitor(bot):
     """Фоновый непрерывный цикл отслеживания новых сообщений от рекрутера в чате MAX."""
     log.info("screener_monitor_loop_started")
-    poll_interval = 2.0  # Проверка каждые 2 секунды
+    poll_interval = 5.0  # Проверка каждые 5 секунд
 
     while _screener_state.get("is_monitoring", False):
         try:
@@ -1862,7 +1862,7 @@ async def cb_screener_toggle(callback: CallbackQuery, **kw):
 
     await callback.message.edit_text(
         "✅ <b>Скринер успешно запущен на автоотслеживание!</b>\n\n"
-        "⚡️ <i>Бот сканирует диалог каждые 2 секунды.</i>\n"
+        "⚡️ <i>Бот сканирует диалог каждые 5 секунд.</i>\n"
         "Как только рекрутер пришлет вопрос, бот сразу пришлет вам карточку с готовым вариантом ответа для отправки.",
         parse_mode="HTML",
         reply_markup=screener_menu_keyboard(True),
