@@ -1022,112 +1022,117 @@ class HHPlaywright:
             ("invited", HH_NEGOTIATIONS + "?state=INVITED"),
         ]
 
-        for tab_name, url in tabs:
-            try:
-                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-                # Wait for content to settle before scraping
+        for tab_name, base_url in tabs:
+            for page_num in range(10):  # Fetch up to 10 pages per tab
+                url = base_url + ("&" if "?" in base_url else "?") + f"page={page_num}"
                 try:
-                    await page.wait_for_selector(
-                        '[data-qa="negotiations-item"], .negotiations-list-item, [data-qa="empty-negotiations"]',
-                        timeout=10000,
-                    )
-                except PlaywrightTimeout:
-                    pass
-                await page.wait_for_timeout(2000)
-
-                # Extract all items via single JS evaluation. Retry если контекст
-                # разрушился из-за фоновой навигации страницы.
-                _STATUS_JS = """() => {
-                    const sel = document.querySelectorAll('[data-qa="negotiations-item"], .negotiations-list-item');
-                    const out = [];
-                    let firstHtml = '';
-                    for (let i = 0; i < sel.length; i++) {
-                        const el = sel[i];
-                        if (i === 0) {
-                            firstHtml = (el.outerHTML || '').substring(0, 1500);
-                        }
-                        const titleEl = el.querySelector('[data-qa="negotiations-item-title"]')
-                            || el.querySelector('a[href*="/vacancy/"]')
-                            || el.querySelector('a');
-                        const companyEl = el.querySelector('[data-qa="negotiations-item-company"]');
-                        const statusEl = el.querySelector('[data-qa="negotiations-item-status"], [data-qa*="negotiations-tag negotiations-item-"]');
-                        const unreadEl = el.querySelector('.negotiations-item__unread, [data-qa="negotiations-item-unread"]');
-                        const allLinks = Array.from(el.querySelectorAll('a')).map(a => a.getAttribute('href') || '').filter(Boolean);
-                        out.push({
-                            title: titleEl ? (titleEl.innerText || '').trim() : '',
-                            href: titleEl ? titleEl.getAttribute('href') || '' : '',
-                            all_links: allLinks,
-                            company: companyEl ? (companyEl.innerText || '').trim() : '',
-                            status: statusEl ? (statusEl.innerText || '').trim() : '',
-                            has_unread: !!unreadEl,
-                        });
-                    }
-                    return {items: out, sample_html: firstHtml};
-                }"""
-                items_data = {"items": [], "sample_html": ""}
-                for ev_attempt in (1, 2):
+                    await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                    # Wait for content to settle before scraping
                     try:
-                        items_data = await page.evaluate(_STATUS_JS)
-                        break
-                    except Exception as ev_e:
-                        if ev_attempt == 1 and "Execution context was destroyed" in str(ev_e):
-                            log.warning("hh_status_evaluate_retry", tab=tab_name)
-                            try:
-                                await page.wait_for_load_state("networkidle", timeout=8000)
-                            except Exception:
-                                pass
-                            await page.wait_for_timeout(1000)
-                            continue
-                        raise
-                if isinstance(items_data, dict):
-                    if items_data.get("sample_html"):
-                        log.info("hh_neg_sample_html", tab=tab_name, html=items_data["sample_html"][:800])
-                    items_data = items_data.get("items", [])
+                        await page.wait_for_selector(
+                            '[data-qa="negotiations-item"], .negotiations-list-item, [data-qa="empty-negotiations"]',
+                            timeout=10000,
+                        )
+                    except PlaywrightTimeout:
+                        pass
+                    await page.wait_for_timeout(2000)
 
-                for d in items_data:
-                    thread_id = ""
-                    topic_url = ""
-                    href = d.get("href", "")
-                    all_links = d.get("all_links", []) or []
-
-                    # Find topic link among all links
-                    for link in all_links:
-                        if "topicId=" in link or "/negotiations/item" in link:
-                            topic_url = link
+                    # Extract all items via single JS evaluation. Retry если контекст
+                    # разрушился из-за фоновой навигации страницы.
+                    _STATUS_JS = """() => {
+                        const sel = document.querySelectorAll('[data-qa="negotiations-item"], .negotiations-list-item');
+                        const out = [];
+                        let firstHtml = '';
+                        for (let i = 0; i < sel.length; i++) {
+                            const el = sel[i];
+                            if (i === 0) {
+                                firstHtml = (el.outerHTML || '').substring(0, 1500);
+                            }
+                            const titleEl = el.querySelector('[data-qa="negotiations-item-title"]')
+                                || el.querySelector('a[href*="/vacancy/"]')
+                                || el.querySelector('a');
+                            const companyEl = el.querySelector('[data-qa="negotiations-item-company"]');
+                            const statusEl = el.querySelector('[data-qa="negotiations-item-status"], [data-qa*="negotiations-tag negotiations-item-"]');
+                            const unreadEl = el.querySelector('.negotiations-item__unread, [data-qa="negotiations-item-unread"]');
+                            const allLinks = Array.from(el.querySelectorAll('a')).map(a => a.getAttribute('href') || '').filter(Boolean);
+                            out.push({
+                                title: titleEl ? (titleEl.innerText || '').trim() : '',
+                                href: titleEl ? titleEl.getAttribute('href') || '' : '',
+                                all_links: allLinks,
+                                company: companyEl ? (companyEl.innerText || '').trim() : '',
+                                status: statusEl ? (statusEl.innerText || '').trim() : '',
+                                has_unread: !!unreadEl,
+                            });
+                        }
+                        return {items: out, sample_html: firstHtml};
+                    }"""
+                    items_data = {"items": [], "sample_html": ""}
+                    for ev_attempt in (1, 2):
+                        try:
+                            items_data = await page.evaluate(_STATUS_JS)
                             break
+                        except Exception as ev_e:
+                            if ev_attempt == 1 and "Execution context was destroyed" in str(ev_e):
+                                log.warning("hh_status_evaluate_retry", tab=tab_name)
+                                try:
+                                    await page.wait_for_load_state("networkidle", timeout=8000)
+                                except Exception:
+                                    pass
+                                await page.wait_for_timeout(1000)
+                                continue
+                            raise
+                    if isinstance(items_data, dict):
+                        if items_data.get("sample_html") and page_num == 0:
+                            log.info("hh_neg_sample_html", tab=tab_name, html=items_data["sample_html"][:800])
+                        items_data = items_data.get("items", [])
+                    
+                    if not items_data:
+                        break
 
-                    # Extract topicId from topic_url
-                    m = re.search(r"topicId=(\d+)", topic_url)
-                    if not m:
-                        m = re.search(r"/negotiations/(?:item/)?(\d+)", topic_url)
-                    if m:
-                        thread_id = f"hh_{m.group(1)}"
-                    elif href:
-                        m2 = re.search(r"/(\d+)/?$", href)
-                        if m2:
-                            thread_id = f"hh_{m2.group(1)}"
-                    if not d.get("title") and not d.get("status"):
-                        continue
-                    # Build absolute negotiation URL
-                    full_topic_url = ""
-                    if topic_url:
-                        full_topic_url = topic_url if topic_url.startswith("http") else f"https://hh.ru{topic_url}"
-                    statuses.append({
-                        "platform": "hh",
-                        "tab": _classify_status(d.get("status", "")),
-                        "title": d.get("title", ""),
-                        "company": d.get("company", ""),
-                        "status": d.get("status", ""),
-                        "text": f"Статус: {d.get('status','')}" if d.get("status") else "",
-                        "thread_id": thread_id,
-                        "topic_url": full_topic_url,
-                        "vacancy_url": href,
-                        "sender": d.get("company", ""),
-                        "has_unread": d.get("has_unread", False),
-                    })
+                    for d in items_data:
+                        thread_id = ""
+                        topic_url = ""
+                        href = d.get("href", "")
+                        all_links = d.get("all_links", []) or []
 
-            except Exception as e:
-                log.warning("hh_negotiations_tab_error", tab=tab_name, error=str(e))
+                        # Find topic link among all links
+                        for link in all_links:
+                            if "topicId=" in link or "/negotiations/item" in link:
+                                topic_url = link
+                                break
+
+                        # Extract topicId from topic_url
+                        m = re.search(r"topicId=(\d+)", topic_url)
+                        if not m:
+                            m = re.search(r"/negotiations/(?:item/)?(\d+)", topic_url)
+                        if m:
+                            thread_id = f"hh_{m.group(1)}"
+                        elif href:
+                            m2 = re.search(r"/(\d+)/?$", href)
+                            if m2:
+                                thread_id = f"hh_{m2.group(1)}"
+                        if not d.get("title") and not d.get("status"):
+                            continue
+                        # Build absolute negotiation URL
+                        full_topic_url = ""
+                        if topic_url:
+                            full_topic_url = topic_url if topic_url.startswith("http") else f"https://hh.ru{topic_url}"
+                        statuses.append({
+                            "platform": "hh",
+                            "tab": _classify_status(d.get("status", "")),
+                            "title": d.get("title", ""),
+                            "company": d.get("company", ""),
+                            "status": d.get("status", ""),
+                            "text": f"Статус: {d.get('status','')}" if d.get("status") else "",
+                            "thread_id": thread_id,
+                            "topic_url": full_topic_url,
+                            "vacancy_url": href,
+                            "sender": d.get("company", ""),
+                            "has_unread": d.get("has_unread", False),
+                        })
+
+                except Exception as e:
+                    log.warning("hh_negotiations_tab_error", tab=tab_name, error=str(e))
 
         log.info("hh_negotiations_status", total=len(statuses),
                  invites=sum(1 for s in statuses if s["tab"] == "invitations"),
