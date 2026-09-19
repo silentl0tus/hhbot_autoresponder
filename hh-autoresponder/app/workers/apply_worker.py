@@ -10,6 +10,7 @@ from app.models.vacancy import Vacancy, VacancyStatus
 from app.models.application import Application, ApplicationStatus
 from app.parsers.hh import HHParser
 from app.utils.anti_detect import random_delay
+from app.services.google_sheets import append_application
 
 log = structlog.get_logger()
 
@@ -278,6 +279,34 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
                 elif already:
                     v.status = VacancyStatus.APPLIED
                 await session.commit()
+                
+                # Fetch date formatting
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+                date_str = datetime.now(ZoneInfo("Europe/Moscow")).strftime("%Y-%m-%d %H:%M:%S")
+                
+                # Append to Google Sheets if it's a new application attempt (not already applied)
+                if not already:
+                    company_name = vacancy.company.name if vacancy.company else ""
+                    salary_str = ""
+                    if vacancy.salary_from and vacancy.salary_to:
+                        salary_str = f"{vacancy.salary_from} - {vacancy.salary_to} {vacancy.salary_currency}"
+                    elif vacancy.salary_from:
+                        salary_str = f"от {vacancy.salary_from} {vacancy.salary_currency}"
+                    elif vacancy.salary_to:
+                        salary_str = f"до {vacancy.salary_to} {vacancy.salary_currency}"
+                        
+                    asyncio.create_task(append_application(
+                        date_str=date_str,
+                        title=vacancy.title or "",
+                        company=company_name,
+                        salary=salary_str,
+                        work_format=vacancy.work_format or "",
+                        url=vacancy.url or "",
+                        status="Успешно" if success else "Ошибка",
+                        cover_letter=letter,
+                        ai_score=vacancy.ai_score
+                    ))
 
             log.info(
                 "apply_result",

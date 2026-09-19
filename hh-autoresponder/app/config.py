@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     hh_password: str = ""
     hh_resume_id: str = ""            # id резюме (подставится автоматически при первом входе)
 
+    # ── Google Таблицы (опционально) ──────────────────────────
+    google_sheet_url: str = ""
+    google_sheets_credentials_path: str = "configs/google_credentials.json"
+
     # ── Профиль и цель ────────────────────────────────────────
     desired_position: str = "Performance-маркетолог"
     desired_salary_min: int = 150000
