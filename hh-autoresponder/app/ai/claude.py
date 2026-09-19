@@ -1,5 +1,5 @@
 import json
-
+import re
 import httpx
 import structlog
 
@@ -23,6 +23,47 @@ TEST_MODEL = settings.llm_model
 def _ai_ready() -> bool:
     """AI используется только если включён и задан ключ."""
     return bool(settings.ai_enabled and settings.llm_api_key)
+
+
+def clean_screener_answer(text: str) -> str:
+    """Очищает сгенерированный ответ скринеру от мета-текста, преамбул и альтернативных вариантов."""
+    if not text:
+        return ""
+
+    # Если модель вернула разделитель '---' или '***' с альтернативами, отсекаем всё после него
+    if "---" in text:
+        text = text.split("---", 1)[0]
+    if "***" in text:
+        text = text.split("***", 1)[0]
+
+    lines = [line.strip() for line in text.split("\n")]
+    filtered_lines = []
+
+    # Регулярки для отлова мусорных строк ассистента
+    meta_patterns = [
+        r"^(вот\s+вариант|вариант\s+\d|ещ[её]\s+вариант|как\s+бы\s+ответил|как\s+мог\s+бы|предлагаемый\s+вариант|ответ:|пример\s+ответа|конечно|держи\s+вариант|вот\s+как)",
+        r"^\*?\*?(вариант|ещ[её]\s+вариант|короткий\s+вариант).*",
+        r"^(первый\s+вариант|второй\s+вариант).*",
+    ]
+
+    for line in lines:
+        if not line:
+            if filtered_lines and filtered_lines[-1] != "":
+                filtered_lines.append("")
+            continue
+
+        lower = line.lower()
+        if any(re.match(pat, lower) for pat in meta_patterns):
+            continue
+
+        filtered_lines.append(line)
+
+    result = "\n".join(filtered_lines).strip()
+    # Убираем обрамляющие кавычки
+    if (result.startswith('"') and result.endswith('"')) or (result.startswith('«') and result.endswith('»')):
+        result = result[1:-1].strip()
+
+    return result
 
 
 class ClaudeAI:
@@ -217,15 +258,21 @@ class ClaudeAI:
             return "", 0, 0
 
         if humanize:
-            humanize_system = get_humanizer_prompt()
-            humanize_msg = f"Сделай ответ живым, кратким и естественным, сохранив все факты:\n\n{text}"
+            humanize_system = (
+                "Ты — соискатель, редактирующий собственное короткое сообщение рекрутеру. "
+                "Сделай текст живым, разговорно-деловым и естественным, сохранив все факты. "
+                "КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО писать преамбулы ('Вот вариант', 'Как мог бы написать живой человек') "
+                "и предлагать несколько вариантов. Выведи СТРОГО ЕДИНСТВЕННЫЙ готовый текст сообщения соискателя."
+            )
+            humanize_msg = f"Отредактируй это сообщение для чата:\n{text}"
             humanized_text, h_inp, h_out = await self._call(humanize_system, humanize_msg, max_tokens=600)
             if humanized_text:
                 text = humanized_text
             inp_tok += h_inp
             out_tok += h_out
 
-        return text.strip(), inp_tok, out_tok
+        clean_text = clean_screener_answer(text)
+        return clean_text or text.strip(), inp_tok, out_tok
 
     async def analyze_sentiment(self, message: str) -> dict:
         default = {"sentiment": "neutral", "intent": "info", "urgency": "low", "summary": message[:100]}

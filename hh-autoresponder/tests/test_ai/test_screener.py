@@ -40,3 +40,24 @@ def test_max_screener_session_check(tmp_path: Path):
     valid_file.write_text('{"cookies": []}', encoding="utf-8")
     parser_valid = MaxScreenerParser(storage_path=valid_file)
     assert parser_valid.is_session_available() is True
+
+
+def test_clean_screener_answer():
+    from app.ai.claude import clean_screener_answer
+
+    raw_output = (
+        "Вот вариант, как это мог бы написать живой человек:\n\n"
+        "Нет, с кампаниями и uplift-моделированием не работал. Мой опыт в ML — это Computer Vision, "
+        "RAG-системы и классификация на PyTorch и scikit-learn.\n\n"
+        "---\n\n"
+        "**Ещё вариант, если нужно короче и разговорнее:**\n\n"
+        "Нет, с uplift и кампейнингом дел не имел."
+    )
+
+    cleaned = clean_screener_answer(raw_output)
+    assert "Вот вариант" not in cleaned
+    assert "Ещё вариант" not in cleaned
+    assert "---" not in cleaned
+    assert cleaned.startswith("Нет, с кампаниями и uplift-моделированием не работал.")
+    assert "scikit-learn." in cleaned
+

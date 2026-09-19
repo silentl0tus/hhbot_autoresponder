@@ -16,7 +16,7 @@ from app.models.vacancy import Vacancy, VacancyStatus
 from app.models.application import Application, ApplicationStatus
 from app.models.blacklist import Blacklist
 from app.models.message import RecruiterMessage
-from app.ai.claude import claude_ai
+from app.ai.claude import claude_ai, clean_screener_answer
 from app.bot.keyboards import (
     main_menu,
     vacancy_keyboard,
@@ -1844,7 +1844,7 @@ async def _handle_screener_question(message: Message, question: str):
 @router.callback_query(F.data == "screener_send")
 @admin_only
 async def cb_screener_send(callback: CallbackQuery, **kw):
-    answer = _screener_state.get("suggested_answer")
+    answer = clean_screener_answer(_screener_state.get("suggested_answer") or "")
     if not answer:
         await callback.answer("Нет ответа для отправки", show_alert=True)
         return
