@@ -139,7 +139,44 @@ class HHParser:
         return None, None, currency
 
     async def get_vacancy_details(self, url: str) -> ParsedVacancy | None:
-        vacancy_id = url.rstrip("/").split("/")[-1].split("?")[0]
+        import re
+        import html
+        m = re.search(r"/vacancy/(\d+)", url)
+        vacancy_id = m.group(1) if m else url.rstrip("/").split("/")[-1].split("?")[0]
+        
+        # 1. Сначала пробуем быстрый и надежный официальный API hh.ru
+        if vacancy_id.isdigit():
+            try:
+                from app.parsers.hh_oauth import hh_oauth, UA
+                token = await hh_oauth.get_token()
+                headers = {"User-Agent": UA}
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+                async with httpx.AsyncClient(headers=headers, timeout=20) as client:
+                    resp = await client.get(f"https://api.hh.ru/vacancies/{vacancy_id}")
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        raw_desc = data.get("description", "")
+                        clean_desc = html.unescape(re.sub(r"<[^>]+>", " ", raw_desc)).strip()
+                        skills = [s.get("name", "") for s in data.get("key_skills", []) if s.get("name")]
+                        emp = data.get("employer", {}) or {}
+                        company_name = emp.get("name", "")
+                        
+                        return ParsedVacancy(
+                            platform="hh",
+                            external_id=vacancy_id,
+                            url=url,
+                            title=data.get("name", ""),
+                            description=clean_desc,
+                            company_name=company_name,
+                            experience=(data.get("experience", {}) or {}).get("name", ""),
+                            employment_type=(data.get("employment", {}) or {}).get("name", ""),
+                            skills=skills,
+                        )
+            except Exception as e:
+                log.warning("hh_api_vacancy_details_failed", error=str(e))
+
+        # 2. Фолбэк на прямой парсинг веб-страницы
         try:
             async with hh_limiter:
                 async with httpx.AsyncClient(headers=HEADERS, follow_redirects=True, timeout=30) as client:
@@ -164,12 +201,16 @@ class HHParser:
             emp_el = soup.select_one('[data-qa="vacancy-view-employment-mode"]')
             employment = emp_el.get_text(strip=True) if emp_el else ""
 
+            company_el = soup.select_one('[data-qa="vacancy-company-name"]')
+            company = company_el.get_text(strip=True) if company_el else ""
+
             return ParsedVacancy(
                 platform="hh",
                 external_id=vacancy_id,
                 url=url,
                 title=title,
                 description=description,
+                company_name=company,
                 experience=experience,
                 employment_type=employment,
                 skills=skills,

@@ -36,7 +36,7 @@ class ClaudeAI:
         client_kwargs = {
             "base_url": settings.llm_base_url.rstrip("/"),
             "headers": {"Authorization": f"Bearer {settings.llm_api_key}"},
-            "timeout": httpx.Timeout(120.0),
+            "timeout": httpx.Timeout(240.0, connect=30.0),
         }
         proxy = settings.llm_proxy or settings.proxy_url
         if proxy:
@@ -53,7 +53,7 @@ class ClaudeAI:
         client_kwargs = {
             "base_url": settings.llm_base_url.rstrip("/"),
             "headers": {"Authorization": f"Bearer {settings.llm_api_key}"},
-            "timeout": httpx.Timeout(120.0),
+            "timeout": httpx.Timeout(240.0, connect=30.0),
         }
         proxy = settings.llm_proxy or settings.proxy_url
         if proxy:
