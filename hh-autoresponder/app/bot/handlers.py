@@ -1793,7 +1793,24 @@ async def _screener_background_monitor(bot):
                 if q:
                     _screener_state["waiting_for_user_action"] = True
                     _screener_state["question"] = q
-                    answer, _, _ = await claude_ai.generate_screener_answer(q)
+
+                    chat_id = _screener_state.get("chat_id") or settings.tg_admin_chat_id
+                    status_msg = None
+                    if chat_id:
+                        try:
+                            status_msg = await bot.send_message(
+                                chat_id=int(chat_id),
+                                text=(
+                                    f"🎯 <b>Новый вопрос от скринера вакансий:</b>\n"
+                                    f"<i>«{q}»</i>\n\n"
+                                    f"⏳ <i>Нейросеть готовит ответ на основе резюме...</i>"
+                                ),
+                                parse_mode="HTML",
+                            )
+                        except Exception as e:
+                            log.warning("screener_notify_temp_failed", error=str(e))
+
+                    answer, _, _ = await claude_ai.generate_screener_answer(q, humanize=False)
                     answer = clean_screener_answer(answer)
                     _screener_state["suggested_answer"] = answer
 
@@ -1804,14 +1821,30 @@ async def _screener_background_monitor(bot):
                         f"<blockquote>{answer}</blockquote>\n\n"
                         f"Отправить этот ответ в чат рекрутеру или отредактировать?"
                     )
-                    chat_id = _screener_state.get("chat_id") or settings.tg_admin_chat_id
                     if chat_id:
-                        await bot.send_message(
-                            chat_id=int(chat_id),
-                            text=card_text,
-                            parse_mode="HTML",
-                            reply_markup=screener_card_keyboard(has_pending=True),
-                        )
+                        if status_msg:
+                            try:
+                                await bot.edit_message_text(
+                                    chat_id=int(chat_id),
+                                    message_id=status_msg.message_id,
+                                    text=card_text,
+                                    parse_mode="HTML",
+                                    reply_markup=screener_card_keyboard(has_pending=True),
+                                )
+                            except Exception:
+                                await bot.send_message(
+                                    chat_id=int(chat_id),
+                                    text=card_text,
+                                    parse_mode="HTML",
+                                    reply_markup=screener_card_keyboard(has_pending=True),
+                                )
+                        else:
+                            await bot.send_message(
+                                chat_id=int(chat_id),
+                                text=card_text,
+                                parse_mode="HTML",
+                                reply_markup=screener_card_keyboard(has_pending=True),
+                            )
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -1881,7 +1914,14 @@ async def cb_screener_poll(callback: CallbackQuery, **kw):
     if q and not _screener_state.get("waiting_for_user_action", False):
         _screener_state["waiting_for_user_action"] = True
         _screener_state["question"] = q
-        answer, _, _ = await claude_ai.generate_screener_answer(q)
+
+        status_msg = await callback.message.answer(
+            f"🎯 <b>Вопрос от скринера вакансий:</b>\n"
+            f"<i>«{q}»</i>\n\n"
+            f"⏳ <i>Нейросеть готовит ответ на основе резюме...</i>",
+            parse_mode="HTML",
+        )
+        answer, _, _ = await claude_ai.generate_screener_answer(q, humanize=False)
         answer = clean_screener_answer(answer)
         _screener_state["suggested_answer"] = answer
 
@@ -1892,7 +1932,10 @@ async def cb_screener_poll(callback: CallbackQuery, **kw):
             f"<blockquote>{answer}</blockquote>\n\n"
             f"Отправить этот ответ в чат рекрутеру или отредактировать?"
         )
-        await callback.message.answer(card_text, parse_mode="HTML", reply_markup=screener_card_keyboard(has_pending=True))
+        try:
+            await status_msg.edit_text(card_text, parse_mode="HTML", reply_markup=screener_card_keyboard(has_pending=True))
+        except Exception:
+            await callback.message.answer(card_text, parse_mode="HTML", reply_markup=screener_card_keyboard(has_pending=True))
     elif q:
         await callback.answer("У вас уже есть ожидающий вопрос выше.")
     else:
