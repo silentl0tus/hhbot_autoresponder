@@ -515,6 +515,16 @@ async def _send_balance(target):
     gemini_k = _mask_key(settings.gemini_api_key)
     openrouter_k = _mask_key(settings.openrouter_api_key)
 
+    is_openrouter = "openrouter" in settings.llm_base_url
+    if is_openrouter:
+        models_info = "• <code>deepseek/deepseek-v4-flash-0731:free</code> — ⚡️ 100% Free (DeepSeek)"
+    else:
+        models_info = (
+            "• <code>gemini-3.6-flash</code> — ⚡️ Основная Flash (Google)\n"
+            "• <code>gemini-3.8-flash</code> — 🚀 Новейшая Flash (Google)\n"
+            "• <code>gemini-3.5-flash</code> — 🔹 Быстрая Flash (Google)"
+        )
+
     text = (
         "💎 <b>Настройка и Статус AI (LLM)</b>\n\n"
         f"⚡️ <b>Статус:</b> {status_str}\n"
@@ -525,13 +535,11 @@ async def _send_balance(target):
         "💾 <b>Сохранённые ключи провайдеров:</b>\n"
         f"• 🌐 Google Gemini: {gemini_k}\n"
         f"• 🚀 OpenRouter: {openrouter_k}\n\n"
-        "📊 <b>Быстрый выбор моделей:</b>\n"
-        "• <code>gemini-3.6-flash</code> — ⚡️ Основная Flash\n"
-        "• <code>deepseek/deepseek-v4-flash-0731:free</code> — 🆓 Free\n"
-        "• <code>gemini-3.5-flash</code> — 🔹 Быстрая Flash\n\n"
+        f"📊 <b>Модели ({'OpenRouter' if is_openrouter else 'Gemini'}):</b>\n"
+        f"{models_info}\n\n"
         "👇 <b>Управление настройками:</b>"
     )
-    reply_kb = ai_models_keyboard(settings.llm_model, ai_enabled=settings.ai_enabled)
+    reply_kb = ai_models_keyboard(settings.llm_model, ai_enabled=settings.ai_enabled, is_openrouter=is_openrouter)
 
     if isinstance(target, CallbackQuery):
         if target.message:
@@ -573,6 +581,16 @@ async def cb_ai_preset(callback: CallbackQuery, **kw):
         else:
             msg_text = "✅ Установлен пресет Google Gemini! Задайте API-ключ через кнопку."
 
+        try:
+            from pathlib import Path
+            import json
+            sf = Path("data/scheduler_state.json")
+            st = json.loads(sf.read_text()) if sf.exists() else {}
+            st["selected_llm_model"] = settings.llm_model
+            sf.write_text(json.dumps(st))
+        except Exception:
+            pass
+
         claude_ai.reinit_client()
         await callback.answer(msg_text, show_alert=True)
     elif preset == "openrouter":
@@ -587,6 +605,16 @@ async def cb_ai_preset(callback: CallbackQuery, **kw):
             msg_text = "✅ Установлен пресет OpenRouter (ключ OpenRouter применён)!"
         else:
             msg_text = "✅ Установлен пресет OpenRouter! Задайте API-ключ через кнопку."
+
+        try:
+            from pathlib import Path
+            import json
+            sf = Path("data/scheduler_state.json")
+            st = json.loads(sf.read_text()) if sf.exists() else {}
+            st["selected_llm_model"] = settings.llm_model
+            sf.write_text(json.dumps(st))
+        except Exception:
+            pass
 
         claude_ai.reinit_client()
         await callback.answer(msg_text, show_alert=True)

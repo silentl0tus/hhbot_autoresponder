@@ -41,11 +41,11 @@ class Settings(BaseSettings):
     # ── LLM (опционально: только для прохождения тестов работодателя) ──
     ai_enabled: bool = False
     humanize_letters: bool = False
-    llm_base_url: str = "https://api.polza.ai/api/v1"   # OpenAI-совместимый эндпоинт
+    llm_base_url: str = "https://openrouter.ai/api/v1"   # OpenAI-совместимый эндпоинт
     llm_api_key: str = ""
     gemini_api_key: str = ""
     openrouter_api_key: str = ""
-    llm_model: str = "deepseek/deepseek-v4-flash"
+    llm_model: str = "deepseek/deepseek-v4-flash-0731:free"
     llm_max_tokens_floor: int = 2000
     llm_proxy: str = ""                                 # socks5:// или http:// прокси для LLM (опц.)
 
@@ -105,6 +105,9 @@ class Settings(BaseSettings):
                 self.openrouter_api_key = self.llm_api_key
             elif (self.llm_api_key.startswith("AIza") or self.llm_api_key.startswith("AQ.")) and not self.gemini_api_key:
                 self.gemini_api_key = self.llm_api_key
+        # Для OpenRouter жестко используем DeepSeek
+        if "openrouter" in self.llm_base_url and "gemini" in self.llm_model:
+            self.llm_model = "deepseek/deepseek-v4-flash-0731:free"
         return self
 
     # ── Темп / антибан ────────────────────────────────────────
