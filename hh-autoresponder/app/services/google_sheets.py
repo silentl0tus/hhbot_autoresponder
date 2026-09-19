@@ -105,7 +105,7 @@ def _sync_statuses_sync(parsed_statuses: list[dict]):
                 continue
                 
             href = s.get("vacancy_url", "")
-            m = re.search(r"vacancy/(\d+)", href)
+            m = re.search(r"vacancy(?:Id=|/)(\d+)", href)
             if m:
                 vac_id = m.group(1)
                 update_map[vac_id] = new_status
@@ -121,23 +121,22 @@ def _sync_statuses_sync(parsed_statuses: list[dict]):
             if i == 0:  # Header
                 continue
             
-            if len(row) >= 8:
-                url_col = row[1]  # Column B (Index 1) is URL
-                current_status = row[7]  # Column H (Index 7) is Status
+            url_col = row[1] if len(row) > 1 else ""
+            current_status = row[7] if len(row) > 7 else ""
                 
-                m = re.search(r"vacancy/(\d+)", url_col)
-                if m:
-                    vac_id = m.group(1)
-                    new_status = update_map.get(vac_id)
-                    
-                    if new_status and new_status != current_status:
-                        # Row is i+1 (1-based index)
-                        # Column is H (8th column)
-                        cell_label = f"H{i+1}"
-                        updates.append({
-                            'range': cell_label,
-                            'values': [[new_status]]
-                        })
+            m = re.search(r"vacancy(?:Id=|/)(\d+)", url_col)
+            if m:
+                vac_id = m.group(1)
+                new_status = update_map.get(vac_id)
+                
+                if new_status and new_status != current_status:
+                    # Row is i+1 (1-based index)
+                    # Column is H (8th column)
+                    cell_label = f"H{i+1}"
+                    updates.append({
+                        'range': cell_label,
+                        'values': [[new_status]]
+                    })
 
         if updates:
             worksheet.batch_update(updates)
