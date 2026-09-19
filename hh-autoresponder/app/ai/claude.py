@@ -82,7 +82,8 @@ class ClaudeAI:
         text, inp_tok, out_tok = await self._call(system, user_msg, max_tokens=1500)
         
         if not text:
-            return "❌ Ошибка генерации письма (API недоступно или вернуло ошибку 503). Попробуйте позже.", 0, 0
+            log.warning("ai_cover_letter_generation_failed", error="API empty response or unavailable")
+            return settings.cover_letter, 0, 0
 
         if humanize:
             humanize_system = get_humanizer_prompt()
