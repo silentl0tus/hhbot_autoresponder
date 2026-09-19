@@ -1015,8 +1015,12 @@ class HHPlaywright:
         page = await self._get_page()
         statuses = []
 
-        # Single fetch — categorize by status text
-        tabs = [("all", HH_NEGOTIATIONS)]
+        # Fetch all tabs so we don't miss rejections/invitations pushed off the first page of "all"
+        tabs = [
+            ("all", HH_NEGOTIATIONS),
+            ("declined", HH_NEGOTIATIONS + "?state=DECLINED"),
+            ("invited", HH_NEGOTIATIONS + "?state=INVITED"),
+        ]
 
         for tab_name, url in tabs:
             try:
@@ -1046,7 +1050,7 @@ class HHPlaywright:
                             || el.querySelector('a[href*="/vacancy/"]')
                             || el.querySelector('a');
                         const companyEl = el.querySelector('[data-qa="negotiations-item-company"]');
-                        const statusEl = el.querySelector('[data-qa="negotiations-item-status"]');
+                        const statusEl = el.querySelector('[data-qa="negotiations-item-status"], [data-qa*="negotiations-tag negotiations-item-"]');
                         const unreadEl = el.querySelector('.negotiations-item__unread, [data-qa="negotiations-item-unread"]');
                         const allLinks = Array.from(el.querySelectorAll('a')).map(a => a.getAttribute('href') || '').filter(Boolean);
                         out.push({
@@ -1080,7 +1084,7 @@ class HHPlaywright:
                         log.info("hh_neg_sample_html", tab=tab_name, html=items_data["sample_html"][:800])
                     items_data = items_data.get("items", [])
 
-                for d in items_data[:20]:
+                for d in items_data:
                     thread_id = ""
                     topic_url = ""
                     href = d.get("href", "")

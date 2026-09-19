@@ -80,9 +80,9 @@ async def test_sync_statuses_to_sheets(mock_settings, mock_path, mock_credential
     ]
     
     parsed_statuses = [
-        {"href": "https://hh.ru/vacancy/111", "tab": "discard"},       # Should be Отказ
-        {"href": "https://hh.ru/vacancy/222", "tab": "invitations"},   # Should be Приглашение
-        {"href": "https://hh.ru/vacancy/333", "tab": "pending"}        # Not in sheet, skipped
+        {"vacancy_url": "https://hh.ru/vacancy/111", "tab": "discard"},       # Should be Отказ
+        {"vacancy_url": "https://hh.ru/vacancy/222", "tab": "invitations"},   # Should be Приглашение
+        {"vacancy_url": "https://hh.ru/vacancy/333", "tab": "pending"}        # Not in sheet, skipped
     ]
     
     # Run test
