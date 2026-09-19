@@ -702,8 +702,8 @@ class WorkerScheduler:
         self.scheduler.shutdown()
         log.info("scheduler_stopped")
 
-    async def _job_sync_sheets(self):
-        if self.is_paused:
+    async def _job_sync_sheets(self, force=False):
+        if self.is_paused and not force:
             return
         log.info("sync_sheets_job_started")
         try:
