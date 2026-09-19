@@ -29,7 +29,10 @@ from app.bot.keyboards import (
     limits_keyboard,
     stats_keyboard,
     ai_models_keyboard,
+    screener_card_keyboard,
+    screener_menu_keyboard,
 )
+from app.parsers.max_screener import max_screener
 
 router = Router()
 log = structlog.get_logger()
@@ -61,6 +64,16 @@ def _company_name(vacancy) -> str:
 
 class ManualCoverLetter(StatesGroup):
     waiting_for_url_or_text = State()
+
+
+class MaxScreenerSG(StatesGroup):
+    waiting_edited_answer = State()
+
+
+_screener_state = {
+    "question": "",
+    "suggested_answer": "",
+}
 
 
 
@@ -1733,3 +1746,194 @@ async def cb_force_sync_sheets(callback: CallbackQuery, **kw):
             await callback.message.answer(f"❌ Произошла ошибка при синхронизации: {e}")
     else:
         await callback.message.answer("❌ Внутренняя ошибка: планировщик не инициализирован.")
+
+
+# ══════════════════════════════════════════════════════════════
+#  СКРИНЕР ВАКАНСИЙ (MAX / GIGARECRUITER)
+# ══════════════════════════════════════════════════════════════
+
+@router.callback_query(F.data == "screener_menu")
+@admin_only
+async def cb_screener_menu(callback: CallbackQuery, **kw):
+    await callback.answer()
+    is_running = max_screener._page is not None
+    status_text = "🟢 Активен (подключен к чату)" if is_running else "⚪ Не запущен"
+    session_text = "✅ Найдена (max_state.json)" if max_screener.is_session_available() else "❌ Отсутствует (нужен login_max_linux.sh)"
+    
+    text = (
+        f"💬 <b>Ассистент скринеров вакансий (MAX / ГигаРекрутер)</b>\n\n"
+        f"Статус службы: <b>{status_text}</b>\n"
+        f"Сессия MAX Web: <b>{session_text}</b>\n\n"
+        f"Бот отслеживает вопросы от рекрутера (@giga_recruiter_bot), готовит ответы на основе вашего резюме "
+        f"и запрашивает подтверждение перед отправкой в чат."
+    )
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=screener_menu_keyboard(is_running),
+    )
+
+
+@router.callback_query(F.data == "screener_toggle")
+@admin_only
+async def cb_screener_toggle(callback: CallbackQuery, **kw):
+    if max_screener._page is not None:
+        await max_screener.close()
+        await callback.answer("⏹ Скринер остановлен")
+        await cb_screener_menu(callback, **kw)
+        return
+
+    if not max_screener.is_session_available():
+        await callback.answer("❌ Нет сессии MAX! Запустите login_max_linux.sh", show_alert=True)
+        return
+
+    await callback.answer("🚀 Запуск браузера...")
+    await callback.message.edit_text("⏳ <i>Подключение к веб-мессенджеру MAX и открытие чата со скринером...</i>", parse_mode="HTML")
+    ok = await max_screener.start(headless=True)
+    if not ok:
+        await callback.message.edit_text(
+            "❌ <b>Не удалось подключиться к MAX Web.</b>\nУбедитесь, что сессия актуальна (при необходимости запустите login_max_linux.sh).",
+            parse_mode="HTML",
+            reply_markup=screener_menu_keyboard(False),
+        )
+        return
+
+    # Сразу проверяем новые вопросы
+    await callback.message.edit_text("🔍 <i>Поиск сообщений в чате скринера...</i>", parse_mode="HTML")
+    q = await max_screener.get_latest_screener_question()
+    if q:
+        await _handle_screener_question(callback.message, q)
+    else:
+        await callback.message.edit_text(
+            "✅ <b>Скринер успешно запущен!</b>\n\nБраузер подключен к диалогу. Новых вопросов от рекрутера пока нет. Нажмите «Проверить чат», когда рекрутер пришлет вопрос.",
+            parse_mode="HTML",
+            reply_markup=screener_menu_keyboard(True),
+        )
+
+
+@router.callback_query(F.data == "screener_poll")
+@admin_only
+async def cb_screener_poll(callback: CallbackQuery, **kw):
+    if max_screener._page is None:
+        await callback.answer("Скринер не запущен. Сначала нажмите 'Запустить'", show_alert=True)
+        return
+
+    await callback.answer("🔍 Проверяю чат...")
+    q = await max_screener.get_latest_screener_question()
+    if q:
+        await _handle_screener_question(callback.message, q)
+    else:
+        await callback.answer("Новых вопросов в чате пока нет.")
+
+
+async def _handle_screener_question(message: Message, question: str):
+    _screener_state["question"] = question
+    answer, _, _ = await claude_ai.generate_screener_answer(question)
+    _screener_state["suggested_answer"] = answer
+
+    card_text = (
+        f"🎯 <b>Вопрос от скринера вакансий:</b>\n"
+        f"<i>«{question}»</i>\n\n"
+        f"🤖 <b>Предлагаемый ответ (на основе резюме):</b>\n"
+        f"<blockquote>{answer}</blockquote>\n\n"
+        f"Отправить этот ответ в чат рекрутеру или отредактировать?"
+    )
+    await message.answer(card_text, parse_mode="HTML", reply_markup=screener_card_keyboard(has_pending=True))
+
+
+@router.callback_query(F.data == "screener_send")
+@admin_only
+async def cb_screener_send(callback: CallbackQuery, **kw):
+    answer = _screener_state.get("suggested_answer")
+    if not answer:
+        await callback.answer("Нет ответа для отправки", show_alert=True)
+        return
+
+    await callback.answer("📨 Отправляю в чат MAX...")
+    ok = await max_screener.send_answer(answer)
+    if ok:
+        await callback.message.edit_text(
+            f"✅ <b>Ответ успешно отправлен в чат рекрутеру:</b>\n\n"
+            f"<blockquote>{answer}</blockquote>\n\n"
+            f"<i>Ожидаем следующий вопрос от скринера...</i>",
+            parse_mode="HTML",
+            reply_markup=screener_card_keyboard(has_pending=False),
+        )
+        _screener_state["suggested_answer"] = ""
+    else:
+        await callback.answer("❌ Ошибка при вводе в чат браузера", show_alert=True)
+
+
+@router.callback_query(F.data == "screener_regen")
+@admin_only
+async def cb_screener_regen(callback: CallbackQuery, **kw):
+    question = _screener_state.get("question")
+    if not question:
+        await callback.answer("Вопрос не найден")
+        return
+
+    await callback.answer("🔄 Генерирую альтернативный вариант...")
+    answer, _, _ = await claude_ai.generate_screener_answer(question, humanize=True)
+    _screener_state["suggested_answer"] = answer
+
+    card_text = (
+        f"🎯 <b>Вопрос от скринера вакансий:</b>\n"
+        f"<i>«{question}»</i>\n\n"
+        f"🤖 <b>Новый вариант ответа:</b>\n"
+        f"<blockquote>{answer}</blockquote>\n\n"
+        f"Отправить этот ответ в чат рекрутеру или отредактировать?"
+    )
+    await callback.message.edit_text(card_text, parse_mode="HTML", reply_markup=screener_card_keyboard(has_pending=True))
+
+
+@router.callback_query(F.data == "screener_edit")
+@admin_only
+async def cb_screener_edit(callback: CallbackQuery, state: FSMContext, **kw):
+    await callback.answer()
+    await state.set_state(MaxScreenerSG.waiting_edited_answer)
+    await callback.message.answer(
+        "✏️ <b>Редактирование ответа:</b>\n\n"
+        "Отправьте в этот чат ваш окончательный вариант текста для рекрутера. "
+        "Бот немедленно введет его в диалог в мессенджере MAX.",
+        parse_mode="HTML",
+    )
+
+
+@router.message(MaxScreenerSG.waiting_edited_answer)
+@admin_only
+async def msg_screener_custom_answer(message: Message, state: FSMContext, **kw):
+    custom_text = message.text.strip()
+    await state.clear()
+    await message.answer("📨 <i>Отправляю ваш вариант текста в чат MAX...</i>", parse_mode="HTML")
+    ok = await max_screener.send_answer(custom_text)
+    if ok:
+        await message.answer(
+            f"✅ <b>Ваш ответ успешно отправлен рекрутеру:</b>\n\n"
+            f"<blockquote>{custom_text}</blockquote>\n\n"
+            f"<i>Ожидаем следующий ответ в чате...</i>",
+            parse_mode="HTML",
+            reply_markup=screener_card_keyboard(has_pending=False),
+        )
+        _screener_state["suggested_answer"] = ""
+    else:
+        await message.answer("❌ Ошибка при отправке через браузер. Проверьте, открыта ли страница.", reply_markup=screener_card_keyboard(has_pending=True))
+
+
+@router.callback_query(F.data == "screener_skip")
+@admin_only
+async def cb_screener_skip(callback: CallbackQuery, **kw):
+    _screener_state["question"] = ""
+    _screener_state["suggested_answer"] = ""
+    await callback.answer("Вопрос пропущен")
+    await callback.message.edit_text("⏭ <b>Вопрос пропущен.</b> Ожидаем новые сообщения...", parse_mode="HTML", reply_markup=screener_card_keyboard(has_pending=False))
+
+
+@router.callback_query(F.data == "screener_stop")
+@admin_only
+async def cb_screener_stop(callback: CallbackQuery, **kw):
+    await max_screener.close()
+    _screener_state["question"] = ""
+    _screener_state["suggested_answer"] = ""
+    await callback.answer("🛑 Сессия закрыта")
+    await callback.message.edit_text("🛑 <b>Сессия скринера закрыта.</b> Браузер остановлен.", parse_mode="HTML")
+

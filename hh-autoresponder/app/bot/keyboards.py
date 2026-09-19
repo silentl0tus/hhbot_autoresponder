@@ -95,6 +95,7 @@ def settings_keyboard(is_paused: bool = False, auto_apply: bool = False, limit: 
         ],
         [
             InlineKeyboardButton(text="🧹 Очистить отклики", callback_data="clear_neg"),
+            InlineKeyboardButton(text="💬 Скринер MAX", callback_data="screener_menu"),
         ],
         [
             InlineKeyboardButton(text="🎛 Настройка функций", callback_data="behavior_menu"),
@@ -196,3 +197,33 @@ def stats_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔄 Принудительное обновление статусов", callback_data="force_sync_sheets")]
     ])
+
+
+def screener_card_keyboard(has_pending: bool = True) -> InlineKeyboardMarkup:
+    """Клавиатура карточки вопроса от скринера вакансий."""
+    rows = []
+    if has_pending:
+        rows.append([
+            InlineKeyboardButton(text="📨 Отправить в чат", callback_data="screener_send"),
+            InlineKeyboardButton(text="✏️ Отредактировать", callback_data="screener_edit"),
+        ])
+        rows.append([
+            InlineKeyboardButton(text="🔄 Другой вариант", callback_data="screener_regen"),
+            InlineKeyboardButton(text="⏭ Пропустить", callback_data="screener_skip"),
+        ])
+    rows.append([
+        InlineKeyboardButton(text="🔄 Проверить новые вопросы", callback_data="screener_poll"),
+        InlineKeyboardButton(text="🛑 Закрыть скринер", callback_data="screener_stop"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def screener_menu_keyboard(is_running: bool = False) -> InlineKeyboardMarkup:
+    """Клавиатура меню управления скринером MAX."""
+    toggle_text = "⏹ Остановить скринер" if is_running else "▶️ Запустить скринер MAX"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=toggle_text, callback_data="screener_toggle")],
+        [InlineKeyboardButton(text="🔄 Проверить чат сейчас", callback_data="screener_poll")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back")],
+    ])
+
