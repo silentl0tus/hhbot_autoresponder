@@ -36,14 +36,21 @@ async def test_ai_toggle_and_presets():
         await cb_ai_toggle(mock_callback)
         assert settings.ai_enabled == (not old_val)
 
+        # Setup dummy keys
+        settings.gemini_api_key = "AIzaSyDummyGeminiKey"
+        settings.openrouter_api_key = "sk-or-v1-DummyOpenRouterKey"
+
         # Test Gemini preset
         mock_callback.data = "ai_preset:gemini"
         await cb_ai_preset(mock_callback)
         assert "generativelanguage.googleapis.com" in settings.llm_base_url
         assert settings.llm_model == "gemini-3.6-flash"
+        assert settings.llm_api_key == "AIzaSyDummyGeminiKey"
 
         # Test OpenRouter preset
         mock_callback.data = "ai_preset:openrouter"
         await cb_ai_preset(mock_callback)
         assert "openrouter.ai" in settings.llm_base_url
         assert settings.llm_model == "deepseek/deepseek-v4-flash-0731:free"
+        assert settings.llm_api_key == "sk-or-v1-DummyOpenRouterKey"
+

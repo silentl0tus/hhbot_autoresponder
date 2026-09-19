@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     humanize_letters: bool = False
     llm_base_url: str = "https://api.polza.ai/api/v1"   # OpenAI-совместимый эндпоинт
     llm_api_key: str = ""
+    gemini_api_key: str = ""
+    openrouter_api_key: str = ""
     llm_model: str = "deepseek/deepseek-v4-flash"
     llm_max_tokens_floor: int = 2000
     llm_proxy: str = ""                                 # socks5:// или http:// прокси для LLM (опц.)
@@ -95,6 +97,15 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return v.replace("\\n", "\n")
         return v
+
+    @model_validator(mode="after")
+    def _sync_provider_keys(self):
+        if self.llm_api_key:
+            if self.llm_api_key.startswith("sk-or-") and not self.openrouter_api_key:
+                self.openrouter_api_key = self.llm_api_key
+            elif (self.llm_api_key.startswith("AIza") or self.llm_api_key.startswith("AQ.")) and not self.gemini_api_key:
+                self.gemini_api_key = self.llm_api_key
+        return self
 
     # ── Темп / антибан ────────────────────────────────────────
     check_interval_sec: int = 300

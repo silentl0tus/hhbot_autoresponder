@@ -501,17 +501,23 @@ async def _send_balance(target):
     status_str = "🟢 Включён" if (settings.ai_enabled and settings.llm_api_key) else "🔴 Выключен"
     proxy_str = f"<code>{settings.llm_proxy}</code>" if settings.llm_proxy else "<i>Прямое (без прокси)</i>"
 
+    gemini_k = _mask_key(settings.gemini_api_key)
+    openrouter_k = _mask_key(settings.openrouter_api_key)
+
     text = (
         "💎 <b>Настройка и Статус AI (LLM)</b>\n\n"
         f"⚡️ <b>Статус:</b> {status_str}\n"
         f"📌 <b>Активная модель:</b> <code>{settings.llm_model}</code>\n"
         f"🌐 <b>Base URL:</b> <code>{settings.llm_base_url}</code>\n"
-        f"🔑 <b>API-ключ:</b> {key_masked}\n"
+        f"🔑 <b>Активный API-ключ:</b> {key_masked}\n"
         f"🛡 <b>Прокси:</b> {proxy_str}\n\n"
+        "💾 <b>Сохранённые ключи провайдеров:</b>\n"
+        f"• 🌐 Google Gemini: {gemini_k}\n"
+        f"• 🚀 OpenRouter: {openrouter_k}\n\n"
         "📊 <b>Быстрый выбор моделей:</b>\n"
-        "• <code>gemini-3.6-flash</code> — ⚡️ Основная Flash (Google)\n"
-        "• <code>gemini-3.8-flash</code> — 🚀 Новейшая Flash (Google)\n"
-        "• <code>gemini-3.5-flash</code> — 🔹 Быстрая Flash (Google)\n\n"
+        "• <code>gemini-3.6-flash</code> — ⚡️ Основная Flash\n"
+        "• <code>deepseek/deepseek-v4-flash-0731:free</code> — 🆓 Free\n"
+        "• <code>gemini-3.5-flash</code> — 🔹 Быстрая Flash\n\n"
         "👇 <b>Управление настройками:</b>"
     )
     reply_kb = ai_models_keyboard(settings.llm_model, ai_enabled=settings.ai_enabled)
@@ -548,15 +554,31 @@ async def cb_ai_preset(callback: CallbackQuery, **kw):
         settings.llm_model = "gemini-3.6-flash"
         save_env_variable("LLM_BASE_URL", settings.llm_base_url)
         save_env_variable("LLM_MODEL", settings.llm_model)
+
+        if settings.gemini_api_key:
+            settings.llm_api_key = settings.gemini_api_key
+            save_env_variable("LLM_API_KEY", settings.gemini_api_key)
+            msg_text = "✅ Установлен пресет Google Gemini (ключ Gemini применён)!"
+        else:
+            msg_text = "✅ Установлен пресет Google Gemini! Задайте API-ключ через кнопку."
+
         claude_ai.reinit_client()
-        await callback.answer("✅ Установлен пресет Google Gemini!", show_alert=True)
+        await callback.answer(msg_text, show_alert=True)
     elif preset == "openrouter":
         settings.llm_base_url = "https://openrouter.ai/api/v1"
         settings.llm_model = "deepseek/deepseek-v4-flash-0731:free"
         save_env_variable("LLM_BASE_URL", settings.llm_base_url)
         save_env_variable("LLM_MODEL", settings.llm_model)
+
+        if settings.openrouter_api_key:
+            settings.llm_api_key = settings.openrouter_api_key
+            save_env_variable("LLM_API_KEY", settings.openrouter_api_key)
+            msg_text = "✅ Установлен пресет OpenRouter (ключ OpenRouter применён)!"
+        else:
+            msg_text = "✅ Установлен пресет OpenRouter! Задайте API-ключ через кнопку."
+
         claude_ai.reinit_client()
-        await callback.answer("✅ Установлен пресет OpenRouter!", show_alert=True)
+        await callback.answer(msg_text, show_alert=True)
     else:
         await callback.answer("Неизвестный пресет")
     await _send_balance(callback)
@@ -650,9 +672,21 @@ async def msg_ai_key(message: Message, state: FSMContext, **kw):
     settings.ai_enabled = True
     save_env_variable("LLM_API_KEY", key)
     save_env_variable("AI_ENABLED", "true")
+
+    if key.startswith("sk-or-") or "openrouter" in settings.llm_base_url:
+        settings.openrouter_api_key = key
+        save_env_variable("OPENROUTER_API_KEY", key)
+        provider_hint = " (сохранён для OpenRouter)"
+    elif key.startswith("AIza") or key.startswith("AQ.") or "google" in settings.llm_base_url:
+        settings.gemini_api_key = key
+        save_env_variable("GEMINI_API_KEY", key)
+        provider_hint = " (сохранён для Google Gemini)"
+    else:
+        provider_hint = ""
+
     claude_ai.reinit_client()
     await state.clear()
-    await message.answer("✅ API-ключ сохранён и AI активирован!", parse_mode="HTML")
+    await message.answer(f"✅ API-ключ сохранён{provider_hint} и AI активирован!", parse_mode="HTML")
     await _send_balance(message)
 
 
