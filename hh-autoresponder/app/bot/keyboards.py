@@ -155,13 +155,35 @@ KNOWN_MODELS = [
 ]
 
 
-def ai_models_keyboard(current_model: str) -> InlineKeyboardMarkup:
-    """Клавиатура для выбора активной модели AI."""
+def ai_models_keyboard(current_model: str, ai_enabled: bool = True) -> InlineKeyboardMarkup:
+    """Клавиатура для полного управления AI: выбор моделей, пресеты, смена ключей и прокси."""
     rows = []
+    toggle_text = "🔴 Выключить AI" if ai_enabled else "🟢 Включить AI"
+    rows.append([
+        InlineKeyboardButton(text=toggle_text, callback_data="ai_toggle"),
+        InlineKeyboardButton(text="⚡️ Тест связи с AI", callback_data="ai_test_conn"),
+    ])
+
+    # Быстрый выбор популярных моделей
     for model_id, label in KNOWN_MODELS:
         mark = "✅ " if current_model == model_id else ""
         rows.append([InlineKeyboardButton(text=f"{mark}{label}", callback_data=f"set_model:{model_id}")])
-    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back")])
+    
+    rows.append([
+        InlineKeyboardButton(text="✏️ Ввести свою модель", callback_data="ai_edit:model"),
+    ])
+    rows.append([
+        InlineKeyboardButton(text="🌐 Пресет: Gemini", callback_data="ai_preset:gemini"),
+        InlineKeyboardButton(text="🚀 Пресет: OpenRouter", callback_data="ai_preset:openrouter"),
+    ])
+    rows.append([
+        InlineKeyboardButton(text="🔑 Сменить API-ключ", callback_data="ai_edit:key"),
+        InlineKeyboardButton(text="🌐 Сменить Base URL", callback_data="ai_edit:url"),
+    ])
+    rows.append([
+        InlineKeyboardButton(text="🛡 Прокси для LLM", callback_data="ai_edit:proxy"),
+        InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back"),
+    ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def stats_keyboard() -> InlineKeyboardMarkup:

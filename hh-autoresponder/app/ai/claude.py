@@ -48,6 +48,20 @@ class ClaudeAI:
     def reset_fallback(self):  # совместимость со старым интерфейсом
         pass
 
+    def reinit_client(self):
+        """Пересоздает HTTP клиент с обновленными settings."""
+        client_kwargs = {
+            "base_url": settings.llm_base_url.rstrip("/"),
+            "headers": {"Authorization": f"Bearer {settings.llm_api_key}"},
+            "timeout": httpx.Timeout(120.0),
+        }
+        proxy = settings.llm_proxy or settings.proxy_url
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        self._client = httpx.AsyncClient(**client_kwargs)
+        self.last_error = None
+        log.info("llm_client_reinitialized", base_url=settings.llm_base_url, has_proxy=bool(proxy))
+
     def set_model(self, model_name: str):
         """Переключает активную модель LLM в памяти и обновляет .env."""
         settings.llm_model = model_name
@@ -182,6 +196,35 @@ class ClaudeAI:
             return json.loads(clean)
         except (json.JSONDecodeError, IndexError):
             return default
+
+
+    async def test_connection(self) -> tuple[bool, str]:
+        """Проверяет подключение к LLM API и возвращает (успех, сообщение/ошибка)."""
+        if not settings.llm_api_key:
+            return False, "Не задан LLM_API_KEY в .env или настройках"
+
+        payload = {
+            "model": settings.llm_model,
+            "max_tokens": 50,
+            "messages": [
+                {"role": "user", "content": "Ping! Reply with 'Pong'"},
+            ],
+        }
+        try:
+            resp = await self._client.post("/chat/completions", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            choice = (data.get("choices") or [{}])[0]
+            text = ((choice.get("message") or {}).get("content") or "").strip()
+            return True, text or "OK"
+        except httpx.HTTPStatusError as e:
+            err = f"HTTP {e.response.status_code}: {e.response.text[:200]}"
+            self.last_error = err
+            return False, err
+        except Exception as e:
+            err = f"{type(e).__name__}: {str(e)[:200]}"
+            self.last_error = err
+            return False, err
 
 
 claude_ai = ClaudeAI()
