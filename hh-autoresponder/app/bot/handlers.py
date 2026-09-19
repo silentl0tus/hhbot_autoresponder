@@ -231,17 +231,28 @@ async def process_manual_cover(message: Message, state: FSMContext, **kw):
 
     await message.answer("⏳ Генерирую сопроводительное письмо...")
     
-    cover_text, _, _ = await claude_ai.generate_cover_letter(
-        vacancy_title=title,
-        vacancy_description=description,
-        company_name=company,
-        humanize=settings.humanize_letters
-    )
-    
-    if cover_text:
-        await message.answer(f"✅ Готово:\n\n{cover_text}")
-    else:
-        await message.answer("❌ Ошибка при генерации письма.")
+    try:
+        cover_text, _, _ = await claude_ai.generate_cover_letter(
+            vacancy_title=title,
+            vacancy_description=description,
+            company_name=company,
+            humanize=settings.humanize_letters
+        )
+        
+        if claude_ai.last_error:
+            await message.answer(
+                f"⚠️ <b>Ошибка LLM API:</b>\n<code>{claude_ai.last_error}</code>\n\n"
+                f"📝 Использован шаблон по умолчанию:\n\n{cover_text}",
+                parse_mode="HTML"
+            )
+        elif cover_text:
+            await message.answer(f"✅ <b>Готово:</b>\n\n{cover_text}", parse_mode="HTML")
+        else:
+            err = claude_ai.last_error or "LLM вернула пустой ответ"
+            await message.answer(f"❌ <b>Ошибка при генерации письма:</b>\n<code>{err}</code>", parse_mode="HTML")
+    except Exception as e:
+        log.error("manual_cover_error", error=str(e))
+        await message.answer(f"❌ <b>Ошибка при генерации письма:</b>\n<code>{str(e)}</code>", parse_mode="HTML")
 
 
 @router.message(F.text == "📩 Сообщения")
