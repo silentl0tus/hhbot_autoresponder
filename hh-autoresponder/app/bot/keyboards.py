@@ -149,11 +149,9 @@ def limits_keyboard(current: int) -> InlineKeyboardMarkup:
 
 
 KNOWN_MODELS = [
-    ("gemini-2.0-flash", "🟢 gemini-2.0-flash (1500/день)"),
-    ("gemini-2.5-flash", "🟢 gemini-2.5-flash (1500/день)"),
-    ("gemini-1.5-flash", "🟢 gemini-1.5-flash (1500/день)"),
-    ("gemini-3.6-flash", "⚠️ gemini-3.6-flash (20/день)"),
-    ("gemini-3.8-flash", "⚠️ gemini-3.8-flash (20/день)"),
+    ("gemini-3.6-flash", "⚡️ gemini-3.6-flash (Основная)"),
+    ("gemini-3.8-flash", "🚀 gemini-3.8-flash (Новейшая)"),
+    ("gemini-3.5-flash", "🔹 gemini-3.5-flash (Быстрая)"),
 ]
 
 

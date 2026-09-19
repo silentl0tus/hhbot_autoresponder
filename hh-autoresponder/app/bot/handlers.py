@@ -495,12 +495,10 @@ async def _send_balance(target):
             f"📌 <b>Активная модель:</b> <code>{settings.llm_model}</code>\n"
             f"🌐 <b>Провайдер:</b> {settings.llm_base_url}\n"
             f"⚡️ <b>Статус AI:</b> 🟢 Включён\n\n"
-            "📊 <b>Информация о лимитах моделей (Free Tier):</b>\n"
-            "• <code>gemini-2.0-flash</code> — 🟢 <b>1 500 зап/день</b> (Стабильная, ~750 откликов)\n"
-            "• <code>gemini-2.5-flash</code> — 🟢 <b>1 500 зап/день</b> (Быстрая, ~750 откликов)\n"
-            "• <code>gemini-1.5-flash</code> — 🟢 <b>1 500 зап/день</b> (Классика, ~750 откликов)\n"
-            "• <code>gemini-3.6-flash</code> — ⚠️ <b>20 зап/день</b> (Тест, макс 10 откликов)\n"
-            "• <code>gemini-3.8-flash</code> — ⚠️ <b>20 зап/день</b> (Эксперимент, макс 10 откликов)\n\n"
+            "📊 <b>Информация о моделях Gemini (Free Tier):</b>\n"
+            "• <code>gemini-3.6-flash</code> — ⚡️ <b>Основная модель Google</b>\n"
+            "• <code>gemini-3.8-flash</code> — 🚀 <b>Новейшая Flash-модель</b>\n"
+            "• <code>gemini-3.5-flash</code> — 🔹 <b>Облегчённая быстрая модель</b>\n\n"
             "👇 <b>Выберите модель для использования:</b>"
         )
         reply_kb = ai_models_keyboard(settings.llm_model)
