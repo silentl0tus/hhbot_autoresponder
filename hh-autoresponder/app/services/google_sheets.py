@@ -139,7 +139,7 @@ def _sync_statuses_sync(parsed_statuses: list[dict]):
                     })
 
         if updates:
-            worksheet.batch_update(updates)
+            worksheet.batch_update(updates, value_input_option='USER_ENTERED')
             log.info("google_sheets_statuses_synced", count=len(updates))
 
     except Exception as e:
