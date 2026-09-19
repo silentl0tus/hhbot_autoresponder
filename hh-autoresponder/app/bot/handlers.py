@@ -57,6 +57,10 @@ def _company_name(vacancy) -> str:
         return vacancy.company.name
     return ""
 
+class ManualCoverLetter(StatesGroup):
+    waiting_for_url_or_text = State()
+
+
 
 # ══════════════════════════════════════════════════════════════
 #  КОМАНДЫ И КНОПКИ МЕНЮ
@@ -189,6 +193,52 @@ async def btn_vacancies(message: Message, **kw):
 @admin_only
 async def btn_top(message: Message, **kw):
     await _send_vacancy_page(message, page=0, top_only=True)
+
+
+@router.message(F.text == "📝 Создать сопроводительное")
+@admin_only
+async def btn_manual_cover(message: Message, state: FSMContext, **kw):
+    await message.answer("Отправьте ссылку на вакансию (hh.ru) или вставьте текст описания вакансии:")
+    await state.set_state(ManualCoverLetter.waiting_for_url_or_text)
+
+
+@router.message(ManualCoverLetter.waiting_for_url_or_text)
+@admin_only
+async def process_manual_cover(message: Message, state: FSMContext, **kw):
+    await state.clear()
+    text = message.text.strip()
+    
+    if text.startswith("http"):
+        await message.answer("🔄 Загружаю вакансию по ссылке...")
+        from app.parsers.hh import HHParser
+        parser = HHParser()
+        vacancy = await parser.get_vacancy_details(text)
+        if not vacancy:
+            await message.answer("❌ Не удалось получить данные по ссылке.")
+            return
+        
+        title = vacancy.title
+        description = vacancy.description
+        company = vacancy.company_name
+    else:
+        lines = text.split("\n", 1)
+        title = lines[0]
+        description = text
+        company = ""
+
+    await message.answer("⏳ Генерирую сопроводительное письмо...")
+    
+    cover_text, _, _ = await claude_ai.generate_cover_letter(
+        vacancy_title=title,
+        vacancy_description=description,
+        company_name=company,
+        humanize=settings.humanize_letters
+    )
+    
+    if cover_text:
+        await message.answer(f"✅ Готово:\n\n{cover_text}")
+    else:
+        await message.answer("❌ Ошибка при генерации письма.")
 
 
 @router.message(F.text == "📩 Сообщения")
