@@ -1,6 +1,6 @@
 [project]
 name = "hh-autoresponder"
-version = "1.1.0"
+version = "1.2.0"
 description = "Telegram-бот авто-откликов на вакансии hh.ru (config-driven, AI опционален)"
 requires-python = ">=3.12"
 dependencies = [

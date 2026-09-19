@@ -188,6 +188,18 @@ class WorkerScheduler:
             misfire_grace_time=900,
         )
 
+        self.scheduler.add_job(
+            self._job_sync_sheets,
+            "interval",
+            hours=24,
+            id="sync_sheets",
+            name="Синхронизация Google Sheets",
+            coalesce=True,
+            max_instances=1,
+            misfire_grace_time=3600,
+            next_run_time=datetime.now(MSK) + timedelta(minutes=2),
+        )
+
         self.scheduler.start()
         log.info("scheduler_started", interval=interval)
 
@@ -689,3 +701,21 @@ class WorkerScheduler:
     def stop(self):
         self.scheduler.shutdown()
         log.info("scheduler_stopped")
+
+    async def _job_sync_sheets(self):
+        if self.is_paused:
+            return
+        log.info("sync_sheets_job_started")
+        try:
+            from app.parsers.hh_playwright import HHPlaywright
+            from app.services.google_sheets import sync_statuses_to_sheets
+            
+            # This requires playwright
+            hh = HHPlaywright()
+            statuses = await hh.check_negotiations_status()
+            
+            if statuses:
+                await sync_statuses_to_sheets(statuses)
+                
+        except Exception as e:
+            log.error("sync_sheets_job_error", error=str(e))
