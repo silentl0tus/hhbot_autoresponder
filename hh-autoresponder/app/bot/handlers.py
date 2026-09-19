@@ -10,7 +10,7 @@ from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
-from app.config import settings
+from app.config import settings, save_env_variable
 from app.database import async_session
 from app.models.vacancy import Vacancy, VacancyStatus
 from app.models.application import Application, ApplicationStatus
@@ -480,28 +480,41 @@ def _format_provider(label: str, base_url: str, data: dict | None) -> str:
     )
 
 
+class AISettingsSG(StatesGroup):
+    waiting_for_key = State()
+    waiting_for_url = State()
+    waiting_for_proxy = State()
+    waiting_for_model = State()
+
+
+def _mask_key(key: str) -> str:
+    if not key:
+        return "<i>Не задан</i>"
+    if len(key) <= 10:
+        return "***"
+    return f"<code>{key[:7]}...{key[-5:]}</code>"
+
+
 async def _send_balance(target):
-    """Показать состояние AI, активную модель и кнопки переключения моделей."""
-    if not settings.ai_enabled or not settings.llm_api_key:
-        text = (
-            "💎 <b>AI выключен</b>\n\n"
-            "Отклики отправляются со статичным шаблоном из .env.\n"
-            "Чтобы включить ИИ — задай в .env: <code>AI_ENABLED=true</code> и <code>LLM_API_KEY</code>."
-        )
-        reply_kb = None
-    else:
-        text = (
-            "💎 <b>Настройка и Статус AI (LLM)</b>\n\n"
-            f"📌 <b>Активная модель:</b> <code>{settings.llm_model}</code>\n"
-            f"🌐 <b>Провайдер:</b> {settings.llm_base_url}\n"
-            f"⚡️ <b>Статус AI:</b> 🟢 Включён\n\n"
-            "📊 <b>Информация о моделях Gemini (Free Tier):</b>\n"
-            "• <code>gemini-3.6-flash</code> — ⚡️ <b>Основная модель Google</b>\n"
-            "• <code>gemini-3.8-flash</code> — 🚀 <b>Новейшая Flash-модель</b>\n"
-            "• <code>gemini-3.5-flash</code> — 🔹 <b>Облегчённая быстрая модель</b>\n\n"
-            "👇 <b>Выберите модель для использования:</b>"
-        )
-        reply_kb = ai_models_keyboard(settings.llm_model)
+    """Показать состояние AI, активную модель и кнопки полного управления настройками."""
+    key_masked = _mask_key(settings.llm_api_key)
+    status_str = "🟢 Включён" if (settings.ai_enabled and settings.llm_api_key) else "🔴 Выключен"
+    proxy_str = f"<code>{settings.llm_proxy}</code>" if settings.llm_proxy else "<i>Прямое (без прокси)</i>"
+
+    text = (
+        "💎 <b>Настройка и Статус AI (LLM)</b>\n\n"
+        f"⚡️ <b>Статус:</b> {status_str}\n"
+        f"📌 <b>Активная модель:</b> <code>{settings.llm_model}</code>\n"
+        f"🌐 <b>Base URL:</b> <code>{settings.llm_base_url}</code>\n"
+        f"🔑 <b>API-ключ:</b> {key_masked}\n"
+        f"🛡 <b>Прокси:</b> {proxy_str}\n\n"
+        "📊 <b>Быстрый выбор моделей:</b>\n"
+        "• <code>gemini-3.6-flash</code> — ⚡️ Основная Flash (Google)\n"
+        "• <code>gemini-3.8-flash</code> — 🚀 Новейшая Flash (Google)\n"
+        "• <code>gemini-3.5-flash</code> — 🔹 Быстрая Flash (Google)\n\n"
+        "👇 <b>Управление настройками:</b>"
+    )
+    reply_kb = ai_models_keyboard(settings.llm_model, ai_enabled=settings.ai_enabled)
 
     if isinstance(target, CallbackQuery):
         if target.message:
@@ -516,7 +529,188 @@ async def _send_balance(target):
         await target.answer(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=reply_kb)
 
 
+@router.callback_query(F.data == "ai_toggle")
+@admin_only
+async def cb_ai_toggle(callback: CallbackQuery, **kw):
+    settings.ai_enabled = not settings.ai_enabled
+    save_env_variable("AI_ENABLED", str(settings.ai_enabled).lower())
+    st = "🟢 AI включён" if settings.ai_enabled else "🔴 AI выключен"
+    await callback.answer(st)
+    await _send_balance(callback)
+
+
+@router.callback_query(F.data.startswith("ai_preset:"))
+@admin_only
+async def cb_ai_preset(callback: CallbackQuery, **kw):
+    preset = callback.data.split(":", 1)[1]
+    if preset == "gemini":
+        settings.llm_base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+        settings.llm_model = "gemini-3.6-flash"
+        save_env_variable("LLM_BASE_URL", settings.llm_base_url)
+        save_env_variable("LLM_MODEL", settings.llm_model)
+        claude_ai.reinit_client()
+        await callback.answer("✅ Установлен пресет Google Gemini!", show_alert=True)
+    elif preset == "openrouter":
+        settings.llm_base_url = "https://openrouter.ai/api/v1"
+        settings.llm_model = "deepseek/deepseek-v4-flash-0731:free"
+        save_env_variable("LLM_BASE_URL", settings.llm_base_url)
+        save_env_variable("LLM_MODEL", settings.llm_model)
+        claude_ai.reinit_client()
+        await callback.answer("✅ Установлен пресет OpenRouter!", show_alert=True)
+    else:
+        await callback.answer("Неизвестный пресет")
+    await _send_balance(callback)
+
+
+@router.callback_query(F.data == "ai_test_conn")
+@admin_only
+async def cb_ai_test_conn(callback: CallbackQuery, **kw):
+    await callback.answer("⏳ Проверяю связь с AI...")
+    ok, msg = await claude_ai.test_connection()
+    if ok:
+        await callback.message.answer(
+            f"✅ <b>Связь с AI успешна!</b>\n\n"
+            f"📌 Модель: <code>{settings.llm_model}</code>\n"
+            f"🌐 Провайдер: <code>{settings.llm_base_url}</code>\n"
+            f"💬 Ответ: <i>{msg}</i>",
+            parse_mode="HTML",
+        )
+    else:
+        await callback.message.answer(
+            f"❌ <b>Ошибка связи с AI!</b>\n\n"
+            f"📌 Модель: <code>{settings.llm_model}</code>\n"
+            f"🌐 Провайдер: <code>{settings.llm_base_url}</code>\n"
+            f"⚠️ Ошибка:\n<code>{msg}</code>",
+            parse_mode="HTML",
+        )
+
+
+@router.callback_query(F.data.startswith("ai_edit:"))
+@admin_only
+async def cb_ai_edit(callback: CallbackQuery, state: FSMContext, **kw):
+    action = callback.data.split(":", 1)[1]
+    await callback.answer()
+    if action == "key":
+        await state.set_state(AISettingsSG.waiting_for_key)
+        await callback.message.answer(
+            "🔑 <b>Смена API-ключа LLM</b>\n\n"
+            f"Текущий ключ: {_mask_key(settings.llm_api_key)}\n\n"
+            "Пришлите новый API-ключ сообщением в чат (например <code>sk-or-v1-...</code> или <code>AIzaSy...</code>).\n\n"
+            "Для отмены отправьте /cancel",
+            parse_mode="HTML",
+        )
+    elif action == "url":
+        await state.set_state(AISettingsSG.waiting_for_url)
+        await callback.message.answer(
+            "🌐 <b>Смена Base URL (провайдера)</b>\n\n"
+            f"Текущий URL: <code>{settings.llm_base_url}</code>\n\n"
+            "Примеры:\n"
+            "• <code>https://openrouter.ai/api/v1</code>\n"
+            "• <code>https://generativelanguage.googleapis.com/v1beta/openai</code>\n"
+            "• <code>https://api.polza.ai/api/v1</code>\n\n"
+            "Пришлите новый Base URL в чат или /cancel для отмены.",
+            parse_mode="HTML",
+        )
+    elif action == "proxy":
+        await state.set_state(AISettingsSG.waiting_for_proxy)
+        cur = settings.llm_proxy or "Не задан (прямое подключение)"
+        await callback.message.answer(
+            "🛡 <b>Настройка прокси для LLM</b>\n\n"
+            f"Текущий прокси: <code>{cur}</code>\n\n"
+            "Используется для обхода гео-блокировок LLM провайдеров.\n"
+            "Форматы:\n"
+            "• <code>http://user:pass@host:port</code>\n"
+            "• <code>socks5://user:pass@host:port</code>\n"
+            "• Отправьте <code>none</code>, чтобы отключить прокси.\n\n"
+            "Пришлите адрес прокси в чат или /cancel для отмены.",
+            parse_mode="HTML",
+        )
+    elif action == "model":
+        await state.set_state(AISettingsSG.waiting_for_model)
+        await callback.message.answer(
+            "✏️ <b>Ввод названия модели</b>\n\n"
+            f"Текущая модель: <code>{settings.llm_model}</code>\n\n"
+            "Примеры:\n"
+            "• <code>deepseek/deepseek-v4-flash-0731:free</code>\n"
+            "• <code>google/gemini-2.0-flash-001</code>\n"
+            "• <code>gemini-3.6-flash</code>\n\n"
+            "Пришлите точное название модели в чат или /cancel для отмены.",
+            parse_mode="HTML",
+        )
+
+
+@router.message(AISettingsSG.waiting_for_key)
+@admin_only
+async def msg_ai_key(message: Message, state: FSMContext, **kw):
+    key = (message.text or "").strip()
+    if not key or len(key) < 5:
+        await message.answer("Слишком короткий ключ. Пришлите валидный API-ключ или /cancel.")
+        return
+    settings.llm_api_key = key
+    settings.ai_enabled = True
+    save_env_variable("LLM_API_KEY", key)
+    save_env_variable("AI_ENABLED", "true")
+    claude_ai.reinit_client()
+    await state.clear()
+    await message.answer("✅ API-ключ сохранён и AI активирован!", parse_mode="HTML")
+    await _send_balance(message)
+
+
+@router.message(AISettingsSG.waiting_for_url)
+@admin_only
+async def msg_ai_url(message: Message, state: FSMContext, **kw):
+    url = (message.text or "").strip().rstrip("/")
+    if not url.startswith("http"):
+        await message.answer("URL должен начинаться с http:// или https://. Попробуйте снова или /cancel.")
+        return
+    settings.llm_base_url = url
+    save_env_variable("LLM_BASE_URL", url)
+    claude_ai.reinit_client()
+    await state.clear()
+    await message.answer(f"✅ Base URL обновлён на <code>{url}</code>!", parse_mode="HTML")
+    await _send_balance(message)
+
+
+@router.message(AISettingsSG.waiting_for_proxy)
+@admin_only
+async def msg_ai_proxy(message: Message, state: FSMContext, **kw):
+    val = (message.text or "").strip()
+    if val.lower() in ("none", "off", "0", "нет", "выкл"):
+        settings.llm_proxy = ""
+        save_env_variable("LLM_PROXY", "")
+        claude_ai.reinit_client()
+        await state.clear()
+        await message.answer("✅ Прокси для LLM отключён (используется прямое подключение).")
+        await _send_balance(message)
+        return
+
+    if not (val.startswith("http://") or val.startswith("https://") or val.startswith("socks5://")):
+        await message.answer("Прокси должен начинаться с http://, https:// или socks5://. Отправьте адрес или /cancel.")
+        return
+
+    settings.llm_proxy = val
+    save_env_variable("LLM_PROXY", val)
+    claude_ai.reinit_client()
+    await state.clear()
+    await message.answer("✅ Прокси для LLM сохранён и применён!", parse_mode="HTML")
+    await _send_balance(message)
+
+
+@router.message(AISettingsSG.waiting_for_model)
+@admin_only
+async def msg_ai_model(message: Message, state: FSMContext, **kw):
+    val = (message.text or "").strip()
+    if not val:
+        await message.answer("Название модели не может быть пустым. Попробуйте снова или /cancel.")
+        return
+    claude_ai.set_model(val)
+    await state.clear()
+    await message.answer(f"✅ Модель переключена на <code>{val}</code>!", parse_mode="HTML")
+    await _send_balance(message)
+
+
 @router.callback_query(F.data.startswith("set_model:"))
+@admin_only
 async def cb_set_model(callback: CallbackQuery, **kw):
     model_name = callback.data.split(":", 1)[1]
     claude_ai.set_model(model_name)
@@ -535,6 +729,7 @@ async def cb_set_model(callback: CallbackQuery, **kw):
 
     await callback.answer(f"✅ Модель AI переключена на {model_name}!", show_alert=True)
     await _send_balance(callback)
+
 
 
 # ══════════════════════════════════════════════════════════════
