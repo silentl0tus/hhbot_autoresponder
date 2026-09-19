@@ -1117,6 +1117,7 @@ class HHPlaywright:
                         "text": f"Статус: {d.get('status','')}" if d.get("status") else "",
                         "thread_id": thread_id,
                         "topic_url": full_topic_url,
+                        "vacancy_url": href,
                         "sender": d.get("company", ""),
                         "has_unread": d.get("has_unread", False),
                     })

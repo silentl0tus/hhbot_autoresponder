@@ -104,7 +104,7 @@ def _sync_statuses_sync(parsed_statuses: list[dict]):
             if not new_status:
                 continue
                 
-            href = s.get("href", "")
+            href = s.get("vacancy_url", "")
             m = re.search(r"vacancy/(\d+)", href)
             if m:
                 vac_id = m.group(1)

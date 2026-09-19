@@ -146,3 +146,8 @@ def limits_keyboard(current: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back"),
         ]
     ])
+
+def stats_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Принудительное обновление статусов", callback_data="force_sync_sheets")]
+    ])

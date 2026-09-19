@@ -27,6 +27,7 @@ from app.bot.keyboards import (
     clear_neg_keyboard,
     behavior_keyboard,
     limits_keyboard,
+    stats_keyboard,
 )
 
 router = Router()
@@ -179,6 +180,7 @@ async def btn_stats(message: Message, **kw):
         "🏷 <b>По платформам:</b>\n\n"
         + "\n\n".join(by_plat_lines),
         parse_mode="HTML",
+        reply_markup=stats_keyboard(),
     )
 
 
@@ -1411,3 +1413,18 @@ async def cb_settings_back(callback: CallbackQuery, **kw):
         parse_mode="HTML",
         reply_markup=settings_keyboard(_scheduler.is_paused, _scheduler.auto_apply, limit),
     )
+
+@router.callback_query(F.data == "force_sync_sheets")
+@admin_only
+async def cb_force_sync_sheets(callback: CallbackQuery, **kw):
+    await callback.message.answer("🔄 Начинаю проверку свежих статусов на hh.ru и синхронизацию с таблицей. Это займет около 1-2 минут...")
+    await callback.answer()
+    
+    if _scheduler:
+        try:
+            await _scheduler._job_sync_sheets()
+            await callback.message.answer("✅ Синхронизация статусов с Google Таблицей успешно завершена!")
+        except Exception as e:
+            await callback.message.answer(f"❌ Произошла ошибка при синхронизации: {e}")
+    else:
+        await callback.message.answer("❌ Внутренняя ошибка: планировщик не инициализирован.")
