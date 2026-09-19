@@ -1422,7 +1422,7 @@ async def cb_force_sync_sheets(callback: CallbackQuery, **kw):
     
     if _scheduler:
         try:
-            await _scheduler._job_sync_sheets()
+            await _scheduler._job_sync_sheets(force=True)
             await callback.message.answer("✅ Синхронизация статусов с Google Таблицей успешно завершена!")
         except Exception as e:
             await callback.message.answer(f"❌ Произошла ошибка при синхронизации: {e}")
