@@ -8,6 +8,7 @@ from app.ai.prompts import (
     SYSTEM_REPLY_GENERATOR,
     SYSTEM_SENTIMENT_ANALYZER,
     SYSTEM_COVER_LETTER_GENERATOR,
+    SYSTEM_SCREENER_ANSWER_GENERATOR,
 )
 from app.ai.humanizer import get_humanizer_prompt
 from app.ai.google_models import fetch_live_google_models
@@ -185,6 +186,45 @@ class ClaudeAI:
             except Exception as e:
                 log.warning("notifier_error", error=str(e))
             return "", 0, 0
+        return text.strip(), inp_tok, out_tok
+
+    async def generate_screener_answer(
+        self,
+        question: str,
+        vacancy_context: str = "",
+        history: str = "",
+        humanize: bool = True,
+    ) -> tuple[str, int, int]:
+        """Генерирует емкий и точный ответ соискателя на вопрос-скринер рекрутера."""
+        if not _ai_ready():
+            return "Здравствуйте! Подтверждаю интерес к вакансии, готов обсудить детали.", 0, 0
+
+        system = SYSTEM_SCREENER_ANSWER_GENERATOR.format(
+            resume=settings.resume_text,
+            salary_min=settings.desired_salary_min,
+            salary_max=settings.desired_salary_max,
+        )
+        user_msg = f"Вопрос скринера:\n{question}"
+        if vacancy_context:
+            user_msg += f"\n\nКонтекст вакансии:\n{vacancy_context}"
+        if history:
+            user_msg += f"\n\nПредыдущий диалог:\n{history}"
+
+        text, inp_tok, out_tok = await self._call(system, user_msg, max_tokens=600)
+        if not text:
+            err_reason = self.last_error or "LLM API вернул пустой ответ"
+            log.warning("ai_screener_generation_failed", error=err_reason)
+            return "", 0, 0
+
+        if humanize:
+            humanize_system = get_humanizer_prompt()
+            humanize_msg = f"Сделай ответ живым, кратким и естественным, сохранив все факты:\n\n{text}"
+            humanized_text, h_inp, h_out = await self._call(humanize_system, humanize_msg, max_tokens=600)
+            if humanized_text:
+                text = humanized_text
+            inp_tok += h_inp
+            out_tok += h_out
+
         return text.strip(), inp_tok, out_tok
 
     async def analyze_sentiment(self, message: str) -> dict:
