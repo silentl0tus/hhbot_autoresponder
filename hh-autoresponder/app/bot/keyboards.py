@@ -147,6 +147,25 @@ def limits_keyboard(current: int) -> InlineKeyboardMarkup:
         ]
     ])
 
+
+KNOWN_MODELS = [
+    ("gemini-2.0-flash", "🟢 gemini-2.0-flash (1500/день)"),
+    ("gemini-2.5-flash", "🟢 gemini-2.5-flash (1500/день)"),
+    ("gemini-1.5-flash", "🟢 gemini-1.5-flash (1500/день)"),
+    ("gemini-3.6-flash", "⚠️ gemini-3.6-flash (20/день)"),
+    ("gemini-3.8-flash", "⚠️ gemini-3.8-flash (20/день)"),
+]
+
+
+def ai_models_keyboard(current_model: str) -> InlineKeyboardMarkup:
+    """Клавиатура для выбора активной модели AI."""
+    rows = []
+    for model_id, label in KNOWN_MODELS:
+        mark = "✅ " if current_model == model_id else ""
+        rows.append([InlineKeyboardButton(text=f"{mark}{label}", callback_data=f"set_model:{model_id}")])
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
 def stats_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔄 Принудительное обновление статусов", callback_data="force_sync_sheets")]

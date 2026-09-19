@@ -41,6 +41,8 @@ class WorkerScheduler:
         self.notify_messages = state.get("notify_messages", True)
         self.thank_rejections = state.get("thank_rejections", True)
         self.bump_resume = state.get("bump_resume", True)
+        if "selected_llm_model" in state:
+            settings.llm_model = state["selected_llm_model"]
         self.min_ai_score = 30
         self.notify = notify_callback  # async fn(text) -> sends to TG
 
@@ -86,6 +88,7 @@ class WorkerScheduler:
             state["notify_messages"] = self.notify_messages
             state["thank_rejections"] = self.thank_rejections
             state["bump_resume"] = self.bump_resume
+            state["selected_llm_model"] = settings.llm_model
             state["paused_platforms"] = sorted(self.paused_platforms)
             state["manual_paused_platforms"] = sorted(self.manual_paused_platforms)
             state["last_login_alert"] = self._last_login_alert

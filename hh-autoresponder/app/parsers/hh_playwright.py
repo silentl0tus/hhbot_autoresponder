@@ -5,6 +5,7 @@ Only used when Playwright is available (VPS deployment).
 
 import asyncio
 import re
+from typing import Any
 
 import structlog
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeout
@@ -1397,7 +1398,7 @@ class HHPlaywright:
                         visible = await el.is_visible()
                         if visible:
                             chat_input = el
-                            log.info("hh_thanks_input_found", selector=sel, in_frame=bool(chat_frame))
+                            log.info("hh_thanks_input_found", selector=sel, in_frame=bool(chatik_frame))
                             break
                 except Exception:
                     pass

@@ -9,6 +9,26 @@ def _split(s: str) -> list[str]:
     return [x.strip() for x in (s or "").split(",") if x.strip()]
 
 
+def save_env_variable(key: str, value: str):
+    """Обновляет или добавляет значение переменной в файле .env на диске."""
+    env_path = Path(".env")
+    if not env_path.exists():
+        return
+    content = env_path.read_text(encoding="utf-8")
+    lines = content.splitlines()
+    new_lines = []
+    found = False
+    for line in lines:
+        if line.strip().startswith(f"{key}="):
+            new_lines.append(f"{key}={value}")
+            found = True
+        else:
+            new_lines.append(line)
+    if not found:
+        new_lines.append(f"{key}={value}")
+    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+
 class Settings(BaseSettings):
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
