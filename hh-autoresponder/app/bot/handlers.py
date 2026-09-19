@@ -1,3 +1,4 @@
+import asyncio
 import json
 import functools
 import structlog
@@ -73,7 +74,12 @@ class MaxScreenerSG(StatesGroup):
 _screener_state = {
     "question": "",
     "suggested_answer": "",
+    "is_monitoring": False,
+    "waiting_for_user_action": False,
+    "chat_id": None,
 }
+_screener_task: asyncio.Task | None = None
+
 
 
 
@@ -1757,15 +1763,15 @@ async def cb_force_sync_sheets(callback: CallbackQuery, **kw):
 async def cb_screener_menu(callback: CallbackQuery, **kw):
     await callback.answer()
     is_running = max_screener._page is not None
-    status_text = "🟢 Активен (подключен к чату)" if is_running else "⚪ Не запущен"
+    status_text = "🟢 Активен (автоотслеживание чата)" if is_running else "⚪ Не запущен"
     session_text = "✅ Найдена (max_state.json)" if max_screener.is_session_available() else "❌ Отсутствует (нужен login_max_linux.sh)"
     
     text = (
         f"💬 <b>Ассистент скринеров вакансий (MAX / ГигаРекрутер)</b>\n\n"
         f"Статус службы: <b>{status_text}</b>\n"
         f"Сессия MAX Web: <b>{session_text}</b>\n\n"
-        f"Бот отслеживает вопросы от рекрутера (@giga_recruiter_bot), готовит ответы на основе вашего резюме "
-        f"и запрашивает подтверждение перед отправкой в чат."
+        f"Бот непрерывно в фоне сканирует диалог (@giga_recruiter_bot). При поступлении вопроса он автоматически "
+        f"генерирует ответ по резюме и мгновенно присылает карточку для подтверждения отправки."
     )
     await callback.message.edit_text(
         text,
@@ -1774,10 +1780,58 @@ async def cb_screener_menu(callback: CallbackQuery, **kw):
     )
 
 
+async def _screener_background_monitor(bot):
+    """Фоновый непрерывный цикл отслеживания новых сообщений от рекрутера в чате MAX."""
+    log.info("screener_monitor_loop_started")
+    poll_interval = 2.0  # Проверка каждые 2 секунды
+
+    while _screener_state.get("is_monitoring", False):
+        try:
+            # Если сейчас уже ожидается действие пользователя по текущему вопросу — не дублируем карточки
+            if not _screener_state.get("waiting_for_user_action", False):
+                q = await max_screener.get_latest_screener_question()
+                if q:
+                    _screener_state["waiting_for_user_action"] = True
+                    _screener_state["question"] = q
+                    answer, _, _ = await claude_ai.generate_screener_answer(q)
+                    answer = clean_screener_answer(answer)
+                    _screener_state["suggested_answer"] = answer
+
+                    card_text = (
+                        f"🎯 <b>Новый вопрос от скринера вакансий:</b>\n"
+                        f"<i>«{q}»</i>\n\n"
+                        f"🤖 <b>Предлагаемый ответ (на основе резюме):</b>\n"
+                        f"<blockquote>{answer}</blockquote>\n\n"
+                        f"Отправить этот ответ в чат рекрутеру или отредактировать?"
+                    )
+                    chat_id = _screener_state.get("chat_id") or settings.tg_admin_chat_id
+                    if chat_id:
+                        await bot.send_message(
+                            chat_id=int(chat_id),
+                            text=card_text,
+                            parse_mode="HTML",
+                            reply_markup=screener_card_keyboard(has_pending=True),
+                        )
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.warning("screener_monitor_loop_error", error=str(e))
+
+        await asyncio.sleep(poll_interval)
+
+    log.info("screener_monitor_loop_finished")
+
+
 @router.callback_query(F.data == "screener_toggle")
 @admin_only
 async def cb_screener_toggle(callback: CallbackQuery, **kw):
+    global _screener_task
     if max_screener._page is not None:
+        _screener_state["is_monitoring"] = False
+        _screener_state["waiting_for_user_action"] = False
+        if _screener_task and not _screener_task.done():
+            _screener_task.cancel()
+            _screener_task = None
         await max_screener.close()
         await callback.answer("⏹ Скринер остановлен")
         await cb_screener_menu(callback, **kw)
@@ -1798,17 +1852,21 @@ async def cb_screener_toggle(callback: CallbackQuery, **kw):
         )
         return
 
-    # Сразу проверяем новые вопросы
-    await callback.message.edit_text("🔍 <i>Поиск сообщений в чате скринера...</i>", parse_mode="HTML")
-    q = await max_screener.get_latest_screener_question()
-    if q:
-        await _handle_screener_question(callback.message, q)
-    else:
-        await callback.message.edit_text(
-            "✅ <b>Скринер успешно запущен!</b>\n\nБраузер подключен к диалогу. Новых вопросов от рекрутера пока нет. Нажмите «Проверить чат», когда рекрутер пришлет вопрос.",
-            parse_mode="HTML",
-            reply_markup=screener_menu_keyboard(True),
-        )
+    _screener_state["is_monitoring"] = True
+    _screener_state["waiting_for_user_action"] = False
+    _screener_state["chat_id"] = callback.message.chat.id
+
+    if _screener_task and not _screener_task.done():
+        _screener_task.cancel()
+    _screener_task = asyncio.create_task(_screener_background_monitor(callback.bot))
+
+    await callback.message.edit_text(
+        "✅ <b>Скринер успешно запущен на автоотслеживание!</b>\n\n"
+        "⚡️ <i>Бот сканирует диалог каждые 2 секунды.</i>\n"
+        "Как только рекрутер пришлет вопрос, бот сразу пришлет вам карточку с готовым вариантом ответа для отправки.",
+        parse_mode="HTML",
+        reply_markup=screener_menu_keyboard(True),
+    )
 
 
 @router.callback_query(F.data == "screener_poll")
@@ -1820,25 +1878,25 @@ async def cb_screener_poll(callback: CallbackQuery, **kw):
 
     await callback.answer("🔍 Проверяю чат...")
     q = await max_screener.get_latest_screener_question()
-    if q:
-        await _handle_screener_question(callback.message, q)
+    if q and not _screener_state.get("waiting_for_user_action", False):
+        _screener_state["waiting_for_user_action"] = True
+        _screener_state["question"] = q
+        answer, _, _ = await claude_ai.generate_screener_answer(q)
+        answer = clean_screener_answer(answer)
+        _screener_state["suggested_answer"] = answer
+
+        card_text = (
+            f"🎯 <b>Вопрос от скринера вакансий:</b>\n"
+            f"<i>«{q}»</i>\n\n"
+            f"🤖 <b>Предлагаемый ответ (на основе резюме):</b>\n"
+            f"<blockquote>{answer}</blockquote>\n\n"
+            f"Отправить этот ответ в чат рекрутеру или отредактировать?"
+        )
+        await callback.message.answer(card_text, parse_mode="HTML", reply_markup=screener_card_keyboard(has_pending=True))
+    elif q:
+        await callback.answer("У вас уже есть ожидающий вопрос выше.")
     else:
         await callback.answer("Новых вопросов в чате пока нет.")
-
-
-async def _handle_screener_question(message: Message, question: str):
-    _screener_state["question"] = question
-    answer, _, _ = await claude_ai.generate_screener_answer(question)
-    _screener_state["suggested_answer"] = answer
-
-    card_text = (
-        f"🎯 <b>Вопрос от скринера вакансий:</b>\n"
-        f"<i>«{question}»</i>\n\n"
-        f"🤖 <b>Предлагаемый ответ (на основе резюме):</b>\n"
-        f"<blockquote>{answer}</blockquote>\n\n"
-        f"Отправить этот ответ в чат рекрутеру или отредактировать?"
-    )
-    await message.answer(card_text, parse_mode="HTML", reply_markup=screener_card_keyboard(has_pending=True))
 
 
 @router.callback_query(F.data == "screener_send")
@@ -1855,11 +1913,12 @@ async def cb_screener_send(callback: CallbackQuery, **kw):
         await callback.message.edit_text(
             f"✅ <b>Ответ успешно отправлен в чат рекрутеру:</b>\n\n"
             f"<blockquote>{answer}</blockquote>\n\n"
-            f"<i>Ожидаем следующий вопрос от скринера...</i>",
+            f"⚡️ <i>Ожидаем следующий вопрос от скринера (автоотслеживание активно)...</i>",
             parse_mode="HTML",
             reply_markup=screener_card_keyboard(has_pending=False),
         )
         _screener_state["suggested_answer"] = ""
+        _screener_state["waiting_for_user_action"] = False
     else:
         await callback.answer("❌ Ошибка при вводе в чат браузера", show_alert=True)
 
@@ -1874,6 +1933,7 @@ async def cb_screener_regen(callback: CallbackQuery, **kw):
 
     await callback.answer("🔄 Генерирую альтернативный вариант...")
     answer, _, _ = await claude_ai.generate_screener_answer(question, humanize=True)
+    answer = clean_screener_answer(answer)
     _screener_state["suggested_answer"] = answer
 
     card_text = (
@@ -1910,11 +1970,12 @@ async def msg_screener_custom_answer(message: Message, state: FSMContext, **kw):
         await message.answer(
             f"✅ <b>Ваш ответ успешно отправлен рекрутеру:</b>\n\n"
             f"<blockquote>{custom_text}</blockquote>\n\n"
-            f"<i>Ожидаем следующий ответ в чате...</i>",
+            f"⚡️ <i>Ожидаем следующий вопрос от скринера (автоотслеживание активно)...</i>",
             parse_mode="HTML",
             reply_markup=screener_card_keyboard(has_pending=False),
         )
         _screener_state["suggested_answer"] = ""
+        _screener_state["waiting_for_user_action"] = False
     else:
         await message.answer("❌ Ошибка при отправке через браузер. Проверьте, открыта ли страница.", reply_markup=screener_card_keyboard(has_pending=True))
 
@@ -1924,6 +1985,7 @@ async def msg_screener_custom_answer(message: Message, state: FSMContext, **kw):
 async def cb_screener_skip(callback: CallbackQuery, **kw):
     _screener_state["question"] = ""
     _screener_state["suggested_answer"] = ""
+    _screener_state["waiting_for_user_action"] = False
     await callback.answer("Вопрос пропущен")
     await callback.message.edit_text("⏭ <b>Вопрос пропущен.</b> Ожидаем новые сообщения...", parse_mode="HTML", reply_markup=screener_card_keyboard(has_pending=False))
 
@@ -1931,9 +1993,16 @@ async def cb_screener_skip(callback: CallbackQuery, **kw):
 @router.callback_query(F.data == "screener_stop")
 @admin_only
 async def cb_screener_stop(callback: CallbackQuery, **kw):
+    global _screener_task
+    _screener_state["is_monitoring"] = False
+    _screener_state["waiting_for_user_action"] = False
+    if _screener_task and not _screener_task.done():
+        _screener_task.cancel()
+        _screener_task = None
     await max_screener.close()
     _screener_state["question"] = ""
     _screener_state["suggested_answer"] = ""
     await callback.answer("🛑 Сессия закрыта")
-    await callback.message.edit_text("🛑 <b>Сессия скринера закрыта.</b> Браузер остановлен.", parse_mode="HTML")
+    await callback.message.edit_text("🛑 <b>Сессия скринера закрыта.</b> Браузер и автоотслеживание остановлены.", parse_mode="HTML")
+
 

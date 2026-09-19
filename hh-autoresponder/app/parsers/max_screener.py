@@ -24,6 +24,7 @@ class MaxScreenerParser:
         self._context: BrowserContext | None = None
         self._page: Page | None = None
         self.last_seen_message_text: str | None = None
+        self.last_sent_text: str | None = None
 
     def is_session_available(self) -> bool:
         """Проверяет, сохранен ли файл авторизации в MAX."""
@@ -82,12 +83,12 @@ class MaxScreenerParser:
             return None
 
         try:
-            # Селекторы сообщений в интерфейсе веб-мессенджера MAX
+            # Селекторы сообщений в интерфейсе веб-мессенджера MAX (исключаем свои сообщения)
             selectors = [
-                '[class*="message"]:not([class*="outgoing"]):not([class*="mine"])',
-                '[data-qa*="message-incoming"]',
-                '[class*="bubble"]:not([class*="out"])',
                 '[class*="incoming"] [class*="text"]',
+                '[class*="bubble"]:not([class*="out"]):not([class*="outgoing"]):not([class*="mine"]):not([class*="self"])',
+                '[data-qa*="message-incoming"]',
+                '[class*="message"]:not([class*="outgoing"]):not([class*="mine"]):not([class*="self"]):not([class*="out"]):not([class*="sent"])',
                 '[class*="message-text"]',
                 '[class*="message"]',
             ]
@@ -96,24 +97,32 @@ class MaxScreenerParser:
             for selector in selectors:
                 elements = await self._page.query_selector_all(selector)
                 if elements:
-                    # Берем последний элемент
-                    last_el = elements[-1]
-                    text = (await last_el.inner_text()).strip()
-                    if text and len(text) > 3:
-                        latest_text = text
+                    # Идем с конца в поисках последнего непустого сообщения
+                    for el in reversed(elements):
+                        t = (await el.inner_text()).strip()
+                        if t and len(t) > 3:
+                            # Проверяем, что это не наш собственный только что отправленный ответ
+                            if self.last_sent_text and (t == self.last_sent_text or t in self.last_sent_text or self.last_sent_text in t):
+                                continue
+                            latest_text = t
+                            break
+                    if latest_text:
                         break
 
             if not latest_text:
-                # Фоллбэк: ищем любые текстовые блоки внутри основного контейнера чата
+                # Фоллбэк: ищем текстовые блоки внутри основного контейнера чата
                 chat_container = await self._page.query_selector('[class*="chat-history"], [class*="messages-list"], [id="app"]')
                 if chat_container:
                     all_text = await chat_container.inner_text()
                     lines = [line.strip() for line in all_text.split("\n") if line.strip()]
                     if lines:
-                        latest_text = lines[-1]
+                        candidate = lines[-1]
+                        if not (self.last_sent_text and candidate in self.last_sent_text):
+                            latest_text = candidate
 
             if latest_text and latest_text != self.last_seen_message_text:
                 self.last_seen_message_text = latest_text
+                log.info("screener_question_captured", text_preview=latest_text[:80])
                 return latest_text
 
             return None
@@ -149,15 +158,15 @@ class MaxScreenerParser:
                 return False
 
             await input_field.click()
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.3)
 
             # Очищаем поле ввода если там что-то было
             await self._page.keyboard.press("Control+A")
             await self._page.keyboard.press("Backspace")
 
-            # Вводим текст с имитацией печати человека (задержка 20-50мс между символами)
-            await input_field.type(text, delay=35)
-            await asyncio.sleep(0.8)
+            # Вводим текст с имитацией печати человека (задержка 20-35мс между символами)
+            await input_field.type(text, delay=25)
+            await asyncio.sleep(0.5)
 
             # Пробуем нажать кнопку отправки или Enter
             send_btn = await self._page.query_selector(
@@ -168,7 +177,9 @@ class MaxScreenerParser:
             else:
                 await self._page.keyboard.press("Enter")
 
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
+            self.last_sent_text = text.strip()
+            self.last_seen_message_text = text.strip()
             log.info("max_screener_answer_sent", text_preview=text[:60])
             return True
         except Exception as e:
