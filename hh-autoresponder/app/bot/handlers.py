@@ -28,6 +28,7 @@ from app.bot.keyboards import (
     behavior_keyboard,
     limits_keyboard,
     stats_keyboard,
+    ai_models_keyboard,
 )
 
 router = Router()
@@ -480,24 +481,62 @@ def _format_provider(label: str, base_url: str, data: dict | None) -> str:
 
 
 async def _send_balance(target):
-    """Показать состояние AI (в паблик-версии AI опционален)."""
+    """Показать состояние AI, активную модель и кнопки переключения моделей."""
     if not settings.ai_enabled or not settings.llm_api_key:
         text = (
             "💎 <b>AI выключен</b>\n\n"
-            "Отклики работают без AI. Чтобы ИИ проходил тесты работодателя — "
-            "задай в .env: <code>AI_ENABLED=true</code> и <code>LLM_API_KEY</code>."
+            "Отклики отправляются со статичным шаблоном из .env.\n"
+            "Чтобы включить ИИ — задай в .env: <code>AI_ENABLED=true</code> и <code>LLM_API_KEY</code>."
         )
+        reply_kb = None
     else:
         text = (
-            "💎 <b>AI включён</b>\n\n"
-            f"Провайдер: {settings.llm_base_url}\n"
-            f"Модель: {settings.llm_model}"
+            "💎 <b>Настройка и Статус AI (LLM)</b>\n\n"
+            f"📌 <b>Активная модель:</b> <code>{settings.llm_model}</code>\n"
+            f"🌐 <b>Провайдер:</b> {settings.llm_base_url}\n"
+            f"⚡️ <b>Статус AI:</b> 🟢 Включён\n\n"
+            "📊 <b>Информация о лимитах моделей (Free Tier):</b>\n"
+            "• <code>gemini-2.0-flash</code> — 🟢 <b>1 500 зап/день</b> (Стабильная, ~750 откликов)\n"
+            "• <code>gemini-2.5-flash</code> — 🟢 <b>1 500 зап/день</b> (Быстрая, ~750 откликов)\n"
+            "• <code>gemini-1.5-flash</code> — 🟢 <b>1 500 зап/день</b> (Классика, ~750 откликов)\n"
+            "• <code>gemini-3.6-flash</code> — ⚠️ <b>20 зап/день</b> (Тест, макс 10 откликов)\n"
+            "• <code>gemini-3.8-flash</code> — ⚠️ <b>20 зап/день</b> (Эксперимент, макс 10 откликов)\n\n"
+            "👇 <b>Выберите модель для использования:</b>"
         )
+        reply_kb = ai_models_keyboard(settings.llm_model)
+
     if isinstance(target, CallbackQuery):
-        await target.message.answer(text, parse_mode="HTML", disable_web_page_preview=True)
+        if target.message:
+            try:
+                await target.message.edit_text(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=reply_kb)
+            except Exception:
+                await target.message.answer(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=reply_kb)
+        else:
+            await target.answer(text, parse_mode="HTML")
         await target.answer()
     else:
-        await target.answer(text, parse_mode="HTML", disable_web_page_preview=True)
+        await target.answer(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=reply_kb)
+
+
+@router.callback_query(F.data.startswith("set_model:"))
+async def cb_set_model(callback: CallbackQuery, **kw):
+    model_name = callback.data.split(":", 1)[1]
+    claude_ai.set_model(model_name)
+
+    # Сохраняем в scheduler_state.json
+    try:
+        from pathlib import Path
+        import json
+        sf = Path("data/scheduler_state.json")
+        st = json.loads(sf.read_text()) if sf.exists() else {}
+        st["selected_llm_model"] = model_name
+        sf.parent.mkdir(parents=True, exist_ok=True)
+        sf.write_text(json.dumps(st))
+    except Exception as e:
+        log.warning("save_selected_model_error", error=str(e))
+
+    await callback.answer(f"✅ Модель AI переключена на {model_name}!", show_alert=True)
+    await _send_balance(callback)
 
 
 # ══════════════════════════════════════════════════════════════

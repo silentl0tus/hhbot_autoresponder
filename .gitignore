@@ -33,6 +33,7 @@ wheels/
 # Логи и мусор ОС
 logs/
 *.log
+*.html
 .DS_Store
 Thumbs.db
 
