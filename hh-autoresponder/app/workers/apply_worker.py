@@ -300,10 +300,8 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
                         date_str=date_str,
                         title=vacancy.title or "",
                         company=company_name,
-                        salary=salary_str,
-                        work_format=vacancy.work_format or "",
                         url=vacancy.url or "",
-                        status="Успешно" if success else "Ошибка",
+                        status="Ждем ответа" if success else "Ошибка",
                         cover_letter=letter,
                         ai_score=vacancy.ai_score
                     ))
