@@ -4,7 +4,7 @@ set PYTHONUTF8=1
 cd /d "%~dp0"
 
 echo Активация виртуального окружения...
-if not exist ".venv" (
+if not exist ".venv\Scripts\activate.bat" (
     echo Сначала запустите run_windows.bat, чтобы установить зависимости!
     pause
     exit /b
