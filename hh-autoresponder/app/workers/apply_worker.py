@@ -193,51 +193,33 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
             else:
                 letter = render_letter(vacancy.title)
 
-            # HH через OAuth API (быстро, обходит DDoS Guard)
+            # HH через Playwright (эмуляция браузера для обхода блокировок API)
             result = False
             skip_record = False  # True для глобальных ошибок — не пишем FAILED
             if vacancy.platform == "hh":
-                from app.parsers.hh_oauth import hh_oauth
-                m_id = re.search(r"/vacancy/(\d+)", vacancy.url)
-                vid = m_id.group(1) if m_id else vacancy.external_id
+                parser = HHParser()
                 try:
-                    res, info = await asyncio.wait_for(
-                        hh_oauth.apply(vid, letter),
-                        timeout=20,
+                    await asyncio.wait_for(parser.login(), timeout=60)
+                    res = await asyncio.wait_for(
+                        parser.apply_to_vacancy(vacancy.url, letter),
+                        timeout=300,
                     )
                     result = res
+                    
                     if res is not True and res != "already":
-                        err = ((info or {}).get("error", "") or "").lower()
-                        if err in GLOBAL_ERRORS:
+                        if res in GLOBAL_ERRORS:
                             log.warning(
                                 "hh_apply_run_aborted",
-                                reason=err,
+                                reason=res,
                                 vacancy_id=vacancy.id,
                             )
                             aborted_platforms.add(vacancy.platform)
                             skip_record = True
-                        else:
-                            log.warning("hh_oauth_failed", vacancy_id=vacancy.id, info=info)
-                        # Fallback to Playwright only on quota / needs_test
-                        if err == "needs_test" and not pass_tests:
-                            # Галочка «проходить тесты» выключена — пропускаем тест-вакансию
+                        elif res == "needs_test" and not pass_tests:
                             log.info("hh_skip_test_disabled", vacancy_id=vacancy.id)
                             skip_record = True
-                        elif err == "needs_test":
-                            log.info("hh_fallback_playwright_for_test", vacancy_id=vacancy.id)
-                            # У вакансии анкета/тест — заполняем через Playwright.
-                            # На вопросы теста отвечает AI (если включён), письмо — фиксированное.
-                            parser = HHParser()
-                            try:
-                                await asyncio.wait_for(parser.login(), timeout=60)
-                                result = await asyncio.wait_for(
-                                    parser.apply_to_vacancy(vacancy.url, letter),
-                                    timeout=300,
-                                )
-                            except asyncio.TimeoutError:
-                                result = False
                 except asyncio.TimeoutError:
-                    log.error("hh_oauth_timeout", vacancy_id=vacancy.id)
+                    log.error("hh_playwright_timeout", vacancy_id=vacancy.id)
                     result = False
             elif vacancy.platform == "habr":
                 from app.parsers.habr import HabrParser
