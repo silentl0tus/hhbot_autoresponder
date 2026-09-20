@@ -98,7 +98,7 @@ def settings_keyboard(is_paused: bool = False, auto_apply: bool = False, limit: 
             InlineKeyboardButton(text="💬 Скринер MAX", callback_data="screener_menu"),
         ],
         [
-            InlineKeyboardButton(text="💬 Чат hh.ru", callback_data="hh_chat_menu"),
+            InlineKeyboardButton(text="💬 Чат hh.ru (Бета)", callback_data="hh_chat_menu"),
             InlineKeyboardButton(text="🎛 Настройка функций", callback_data="behavior_menu"),
         ],
     ])

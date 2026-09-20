@@ -2091,7 +2091,7 @@ def _build_hh_card_text(state: dict) -> str:
     answer = _html.escape(state.get("suggested_answer") or "")
 
     lines = [
-        "💬 <b>Вопрос от работодателя на HeadHunter:</b>",
+        "💬 <b>Вопрос от работодателя на HeadHunter</b> <i>[Бета / В разработке]</i>:",
         f"🏢 <b>{company}</b>",
         f"📋 <i>{vacancy}</i>\n",
         f"❓ <b>Вопрос:</b>\n<i>«{q}»</i>\n",
@@ -2266,7 +2266,8 @@ async def cb_hh_chat_menu(callback: CallbackQuery, **kw):
     session_text = "✅ Авторизован (hh_state.json)" if hh_chat_parser.is_session_available() else "❌ Нет сессии (войдите через браузер)"
 
     text = (
-        f"💬 <b>Ассистент чатов HeadHunter (hh.ru/chat)</b>\n\n"
+        f"💬 <b>Ассистент чатов HeadHunter (hh.ru/chat) [БЕТА]</b>\n"
+        f"⚠️ <i>Функция экспериментальная, находится в стадии тестирования.</i>\n\n"
         f"Статус автомониторинга: <b>{status_text}</b>\n"
         f"Сессия hh.ru: <b>{session_text}</b>\n\n"
         f"Бот отслеживает новые сообщения и опросники от работодателей и роботов-рекрутеров. "
