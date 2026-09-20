@@ -36,7 +36,7 @@
 
 [![License](https://img.shields.io/badge/License-MIT-22c55e?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.12+-3776AB?style=flat-square&logo=python&logoColor=white)]()
-[![Version](https://img.shields.io/badge/version-1.0.0-e63946?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-1.3.0-e63946?style=flat-square)]()
 
 </div>
 
