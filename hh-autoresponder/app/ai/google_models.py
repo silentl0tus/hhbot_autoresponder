@@ -35,6 +35,14 @@ def _is_valid_model_name(name: str) -> bool:
     for kw in NON_MODEL_KEYWORDS:
         if kw in parts:
             return False
+            
+    # Google no longer supports models below version 3
+    version_match = re.search(r"gemini-(\d+)\.", name)
+    if version_match:
+        major_version = int(version_match.group(1))
+        if major_version < 3:
+            return False
+            
     return True
 
 
@@ -57,7 +65,13 @@ async def fetch_live_google_models() -> list[str]:
                 resp = await client.get("/models")
                 if resp.status_code == 200:
                     data = resp.json()
-                    models = [m.get("id", "") for m in data.get("data", []) if m.get("id")]
+                    raw_models = [m.get("id", "") for m in data.get("data", []) if m.get("id")]
+                    # For API, model names might be formatted as 'models/gemini-...', so strip prefix if needed
+                    models = []
+                    for m in raw_models:
+                        clean_m = m.replace("models/", "")
+                        if _is_valid_model_name(clean_m):
+                            models.append(clean_m)
                     if models:
                         log.info("google_models_fetched_from_api", count=len(models))
                         return sorted(set(models))

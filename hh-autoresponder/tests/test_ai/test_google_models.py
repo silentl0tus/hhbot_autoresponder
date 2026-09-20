@@ -12,6 +12,7 @@ async def test_fetch_live_google_models_fallback():
         <a href="/gemini-api/docs/models/gemini-3.8-flash">Gemini 3.8 Flash</a>
         <a href="/gemini-api/docs/models/gemini-3.6-flash">Gemini 3.6 Flash</a>
         <a href="/gemini-api/docs/models/gemini-2.5-flash">Gemini 2.5 Flash</a>
+        <a href="/gemini-api/docs/models/gemini-3.5-flash">Gemini 3.5 Flash</a>
       </body>
     </html>
     """
@@ -26,7 +27,8 @@ async def test_fetch_live_google_models_fallback():
         models = await fetch_live_google_models()
         assert "gemini-3.8-flash" in models
         assert "gemini-3.6-flash" in models
-        assert "gemini-2.5-flash" in models
+        assert "gemini-3.5-flash" in models
+        assert "gemini-2.5-flash" not in models
 
 
 @pytest.mark.asyncio
