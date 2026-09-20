@@ -18,6 +18,7 @@ from app.config import settings
 LEVEL_MIDDLE = [r"\bmiddle\b", r"\bmid\b", r"\bсредн"]
 LEVEL_SENIOR = [
     r"\bsenior\b", r"\bстарш", r"\bлид\b", r"\blead\b", r"\bhead\b",
+    r"\bprincipal\b", r"\bархитектор\b", r"\barchitect\b",
     r"руководител", r"директор", r"начальник", r"глава",
 ]
 
@@ -57,10 +58,23 @@ def analyze_vacancy(
             "red_flags": ["title_mismatch"], "stack_match": 0,
         }
 
-    # 2. Стоп-слова в заголовке — контекстная дисквалификация.
+    # 2. Железная дисквалификация Senior/Lead в заголовке.
+    # Если в заголовке есть Senior/Lead/Head/Архитектор и нет явного указания Middle/Junior (вилки) -> отказ
+    has_senior_title = _match_any_re(t, LEVEL_SENIOR)
+    has_middle_or_jun_title = _match_any_re(t, LEVEL_MIDDLE) or bool(
+        re.search(r"\bjunior\b|\bjun\b|\bджуниор\b|\bмладш", t, re.IGNORECASE)
+    )
+    if has_senior_title and not has_middle_or_jun_title:
+        return {
+            "score": 0, "reason": "Отказ (Senior уровень)",
+            "is_relevant": False, "seniority": "senior",
+            "red_flags": ["senior_level"], "stack_match": 0,
+        }
+
+    # 3. Стоп-слова в заголовке — контекстная дисквалификация.
     #    Если заголовок содержит стоп-слово И целевое слово одновременно
-    #    (напр. "Senior AI Engineer") — НЕ дисквалифицируем, а штрафуем -10.
-    #    Если целевого слова нет (напр. "Senior Java Developer") —
+    #    (напр. "AI Engineer") — НЕ дисквалифицируем, а штрафуем -10.
+    #    Если целевого слова нет (напр. "Java Developer") —
     #    дисквалификация (score=0).
     has_negative = _contains_any(t, settings.negative_keywords)
     negative_penalty = 0

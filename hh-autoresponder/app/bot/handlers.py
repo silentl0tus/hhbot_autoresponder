@@ -1770,13 +1770,13 @@ async def cb_settings_back(callback: CallbackQuery, **kw):
 @router.callback_query(F.data == "force_sync_sheets")
 @admin_only
 async def cb_force_sync_sheets(callback: CallbackQuery, **kw):
-    await callback.message.answer("🔄 Начинаю проверку свежих статусов на hh.ru и синхронизацию с таблицей. Это займет около 1-2 минут...")
+    await callback.message.answer("🔄 Начинаю проверку свежих статусов откликов и синхронизацию с таблицей...")
     await callback.answer()
     
     if _scheduler:
         try:
-            await _scheduler._job_sync_sheets(force=True)
-            await callback.message.answer("✅ Синхронизация статусов с Google Таблицей успешно завершена!")
+            count = await _scheduler._job_sync_sheets(force=True)
+            await callback.message.answer(f"✅ Синхронизация статусов с Google Таблицей завершена!\nОбновлено строк: {count}")
         except Exception as e:
             await callback.message.answer(f"❌ Произошла ошибка при синхронизации: {e}")
     else:

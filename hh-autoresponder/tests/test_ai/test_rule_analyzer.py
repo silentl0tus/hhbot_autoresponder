@@ -34,3 +34,16 @@ def test_middle_senior_level_allowance():
     # Так как упоминается middle, отсева по senior не должно быть.
     # Score зависит от других факторов, но точно не 0 по причине "Senior уровень".
     assert res["reason"] != "Отказ (Senior уровень)"
+
+
+def test_senior_in_title_disqualified_even_if_description_mentions_middle():
+    """Тест: Если в заголовке Senior (и нет вилки middle), вакансия должна отсекаться,
+    даже если в описании упоминаются middle разработчики или стек AI."""
+    title = "Senior Fullstack-разработчик (Python/FastAPI + AI)"
+    desc = "Ищем Senior в команду. В подчинении будут middle-разработчики. Стек: Python, FastAPI, Docker."
+    res = analyze_vacancy(title, desc, skills="")
+    assert res["score"] == 0
+    assert res["is_relevant"] is False
+    assert res["reason"] == "Отказ (Senior уровень)"
+    assert "senior_level" in res["red_flags"]
+

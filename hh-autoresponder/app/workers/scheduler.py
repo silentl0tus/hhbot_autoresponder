@@ -198,7 +198,7 @@ class WorkerScheduler:
         self.scheduler.add_job(
             self._job_sync_sheets,
             "interval",
-            hours=24,
+            hours=1,
             id="sync_sheets",
             name="Синхронизация Google Sheets",
             coalesce=True,
@@ -717,20 +717,34 @@ class WorkerScheduler:
         self.scheduler.shutdown()
         log.info("scheduler_stopped")
 
-    async def _job_sync_sheets(self, force=False):
+    async def _job_sync_sheets(self, force=False) -> int:
         if self.is_paused and not force:
-            return
+            return 0
         log.info("sync_sheets_job_started")
+        updated_count = 0
         try:
-            from app.parsers.hh_playwright import HHPlaywright
+            from app.parsers.hh_oauth import hh_oauth
             from app.services.google_sheets import sync_statuses_to_sheets
             
-            # This requires playwright
-            hh = HHPlaywright()
-            statuses = await hh.check_negotiations_status()
+            statuses = []
+            if await hh_oauth.get_token():
+                try:
+                    statuses = await hh_oauth.negotiations_status()
+                    log.info("sync_sheets_oauth_success", count=len(statuses))
+                except Exception as e:
+                    log.warning("sync_sheets_oauth_failed_trying_playwright", error=str(e))
+
+            if not statuses:
+                log.info("sync_sheets_trying_playwright_fallback")
+                from app.parsers.hh_playwright import HHPlaywright
+                hh = HHPlaywright()
+                statuses = await hh.check_negotiations_status()
             
             if statuses:
-                await sync_statuses_to_sheets(statuses)
+                updated_count = await sync_statuses_to_sheets(statuses)
+                log.info("sync_sheets_job_completed", updated_count=updated_count)
+            return updated_count
                 
         except Exception as e:
             log.error("sync_sheets_job_error", error=str(e))
+            return 0

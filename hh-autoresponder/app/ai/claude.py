@@ -67,6 +67,50 @@ def clean_screener_answer(text: str) -> str:
     return result
 
 
+def clean_cover_letter(text: str) -> str:
+    """Очищает текст сопроводительного письма от вводных фраз ('Откликаюсь на вакансию...'),
+    мета-преамбул и лишних кавычек."""
+    if not text:
+        return ""
+
+    # Убираем преамбулы вроде "Text:", "Письмо:", "Сопроводительное письмо:"
+    text = re.sub(r"^(Text|Сопроводительное письмо|Письмо|Текст письма):\s*", "", text, flags=re.IGNORECASE).strip()
+
+    # Шаблоны фраз отклика, которые избыточны в интерфейсе чата HH
+    vacancy_intro_pattern = re.compile(
+        r"^(откликаюсь\s+на\s+вакансию|пишу\s+(вам\s+)?(по\s+поводу|относительно|по)\s+ваканси|меня\s+заинтересовала\s+(ваша\s+)?вакансия|подаю\s+отклик|хочу\s+откликнуться|направляю\s+(свой\s+)?отклик|рассматриваю\s+вакансию)",
+        re.IGNORECASE,
+    )
+
+    lines = [line.strip() for line in text.split("\n")]
+    filtered_lines = []
+
+    for line in lines:
+        if not line:
+            if filtered_lines and filtered_lines[-1] != "":
+                filtered_lines.append("")
+            continue
+
+        cleaned_line = line
+        # Если строка начинается с приветствия, например "Здравствуйте! Откликаюсь на вакансию..."
+        greeting_match = re.match(r"^(здравствуйте|добрый\s+день)[!.,]?\s+(.*)", cleaned_line, re.IGNORECASE)
+        if greeting_match:
+            remainder = greeting_match.group(2).strip()
+            if vacancy_intro_pattern.match(remainder):
+                continue
+
+        if vacancy_intro_pattern.match(cleaned_line):
+            continue
+
+        filtered_lines.append(line)
+
+    result = "\n".join(filtered_lines).strip()
+    if (result.startswith('"') and result.endswith('"')) or (result.startswith('«') and result.endswith('»')):
+        result = result[1:-1].strip()
+
+    return result
+
+
 OPENROUTER_FREE_FALLBACK_MODELS = [
     "nex-agi/nex-n2.5-pro:free",
     "nex-agi/nex-n2.5-mini:free",
@@ -185,8 +229,15 @@ class ClaudeAI:
                 choice = (data.get("choices") or [{}])[0]
                 msg = choice.get("message") or {}
                 text = msg.get("content") or ""
-                if not text and msg.get("reasoning"):
-                    text = msg.get("reasoning")
+
+                # Никогда не используем msg.get("reasoning") как текст ответа:
+                # это внутренний черновик/ход мыслей нейросети.
+                if text:
+                    # Очищаем блоки рассуждений <think>...</think> или <thought>...</thought>
+                    text = re.sub(r"<(think|thought)>.*?</\1>", "", text, flags=re.DOTALL).strip()
+                    # Если генерация оборвалась внутри незакрытого тега рассуждений
+                    if "<think>" in text or "<thought>" in text:
+                        text = re.sub(r"<(think|thought)>.*", "", text, flags=re.DOTALL).strip()
 
                 if text:
                     # Если ответ получен через fallback-модель, автоматически переключаем активную модель
@@ -206,7 +257,7 @@ class ClaudeAI:
                         int(usage.get("completion_tokens", 0) or 0),
                     )
                 else:
-                    last_error_text = f"Модель {candidate_model} вернула пустой контент"
+                    last_error_text = f"Модель {candidate_model} вернула пустой контент (или только мысли reasoning)"
                     log.warning("llm_empty_response", model=candidate_model)
             except httpx.HTTPStatusError as e:
                 last_error_text = f"HTTP {e.response.status_code} ({candidate_model}): {e.response.text[:150]}"
@@ -242,11 +293,34 @@ class ClaudeAI:
             vacancy_title=vacancy_title,
             vacancy_description=vacancy_description[:2000]  # Limit to save tokens
         )
-        user_msg = "Напиши сопроводительное письмо для этой вакансии."
-        text, inp_tok, out_tok = await self._call(system, user_msg, max_tokens=1500)
+        user_msg = (
+            "Напиши сопроводительное письмо для этой вакансии. "
+            "Начинай сразу с ключевых фактов и стека, без вводной фразы 'Откликаюсь на вакансию'."
+        )
+        # Лимит 2500 токенов достаточен и для текста письма, и для запаса на reasoning-модели
+        text, inp_tok, out_tok = await self._call(system, user_msg, max_tokens=2500)
         
+        # Очищаем от вводных фраз отклика ("Откликаюсь на вакансию..."), которые уже есть в интерфейсе HH
+        if text:
+            text = clean_cover_letter(text)
+
+        # Валидация: письмо соискателя на русском языке не должно быть сырым дампом рассуждений на английском
+        if text:
+            has_cyrillic = bool(re.search(r"[а-яёА-ЯЁ]", text))
+            has_reasoning_leak = any(marker in text.lower() for marker in (
+                "we need answer", "candidate has", "strict facts", "forbidden exact phrase", "need map requirements"
+            ))
+            if not has_cyrillic or has_reasoning_leak:
+                log.warning(
+                    "ai_cover_letter_invalid_output_rejected",
+                    has_cyrillic=has_cyrillic,
+                    has_reasoning_leak=has_reasoning_leak,
+                    preview=text[:150],
+                )
+                text = ""
+
         if not text:
-            err_reason = self.last_error or "LLM API вернул пустой ответ"
+            err_reason = self.last_error or "LLM API вернул пустой или некорректный ответ"
             log.warning("ai_cover_letter_generation_failed", error=err_reason)
             try:
                 from app.utils import notifier
@@ -263,9 +337,9 @@ class ClaudeAI:
         if humanize:
             humanize_system = get_humanizer_prompt()
             humanize_msg = f"Очеловечь следующий текст сопроводительного письма, используя свои правила:\n\n{text}"
-            humanized_text, h_inp, h_out = await self._call(humanize_system, humanize_msg, max_tokens=1500)
-            if humanized_text:
-                text = humanized_text
+            humanized_text, h_inp, h_out = await self._call(humanize_system, humanize_msg, max_tokens=2500)
+            if humanized_text and re.search(r"[а-яёА-ЯЁ]", humanized_text):
+                text = clean_cover_letter(humanized_text)
             else:
                 err_reason = self.last_error or "Ошибка при очеловечивании письма"
                 log.warning("humanizer_failed", error=err_reason)

@@ -332,6 +332,8 @@ class HHOAuth:
                 "title": vac.get("name") or "",
                 "company": emp.get("name") or "",
                 "status": (item.get("state") or {}).get("name") or "",
+                "vacancy_id": str(vac.get("id") or ""),
+                "vacancy_url": vac.get("alternate_url") or vac.get("url") or "",
             }
 
         # order_by=created_at — стабильный порядок (created_at не меняется, в
