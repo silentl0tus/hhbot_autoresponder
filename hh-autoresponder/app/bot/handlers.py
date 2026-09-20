@@ -71,6 +71,8 @@ def _company_name(vacancy) -> str:
 class ManualCoverLetter(StatesGroup):
     waiting_for_url_or_text = State()
 
+class SettingsSG(StatesGroup):
+    waiting_for_custom_limit = State()
 
 class MaxScreenerSG(StatesGroup):
     waiting_edited_answer = State()
@@ -1744,18 +1746,30 @@ async def cb_limits_menu(callback: CallbackQuery, **kw):
 
 @router.callback_query(F.data.startswith("set_limit:"))
 @admin_only
-async def cb_set_limit(callback: CallbackQuery, **kw):
+async def cb_set_limit(callback: CallbackQuery, state: FSMContext, **kw):
     if not _scheduler:
         await callback.answer("Scheduler не найден")
         return
     action = callback.data.split(":")[1]
+    
+    if action == "custom":
+        await state.set_state(SettingsSG.waiting_for_custom_limit)
+        await callback.answer()
+        await callback.message.answer(
+            "✏️ <b>Ввод лимита откликов</b>\n\n"
+            "Пришлите желаемое количество откликов в день (числом).\n"
+            "Отправьте /cancel для отмены.",
+            parse_mode="HTML"
+        )
+        return
+
     current = _scheduler.max_applies_per_day_hh
     new_limit = current
     
-    if action == "-10":
-        new_limit = max(1, current - 10)
-    elif action == "+10":
-        new_limit = current + 10
+    if action == "-5":
+        new_limit = max(1, current - 5)
+    elif action == "+5":
+        new_limit = current + 5
     elif action.endswith("_abs"):
         new_limit = int(action.replace("_abs", ""))
         
@@ -1815,6 +1829,29 @@ async def cb_set_model(callback: CallbackQuery, **kw):
         parse_mode="HTML",
         reply_markup=models_keyboard(settings.llm_model)
     )
+
+@router.message(SettingsSG.waiting_for_custom_limit)
+@admin_only
+async def msg_custom_limit(message: Message, state: FSMContext, **kw):
+    text = (message.text or "").strip()
+    if not text.isdigit() or int(text) < 1:
+        await message.answer("❌ Пожалуйста, введите корректное положительное число или /cancel.")
+        return
+        
+    new_limit = int(text)
+    if _scheduler:
+        _scheduler.set_max_applies(new_limit)
+        
+    await state.clear()
+    await message.answer(f"✅ Лимит успешно установлен на <b>{new_limit}</b> в день.", parse_mode="HTML")
+    # Show settings menu again
+    if _scheduler:
+        await message.answer(
+            _settings_text(_scheduler.is_paused, _scheduler.auto_apply, new_limit),
+            parse_mode="HTML",
+            reply_markup=settings_keyboard(_scheduler.is_paused, _scheduler.auto_apply, new_limit, _scheduler.manual_paused_platforms),
+        )
+
 
 @router.callback_query(F.data == "force_sync_sheets")
 @admin_only
