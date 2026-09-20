@@ -34,6 +34,7 @@ from app.bot.keyboards import (
     screener_menu_keyboard,
     hh_chat_card_keyboard,
     hh_chat_menu_keyboard,
+    models_keyboard,
 )
 from app.parsers.max_screener import max_screener
 from app.parsers.hh_chat import hh_chat_parser
@@ -1764,7 +1765,40 @@ async def cb_settings_back(callback: CallbackQuery, **kw):
     await callback.message.edit_text(
         _settings_text(_scheduler.is_paused, _scheduler.auto_apply, limit),
         parse_mode="HTML",
-        reply_markup=settings_keyboard(_scheduler.is_paused, _scheduler.auto_apply, limit),
+        reply_markup=settings_keyboard(_scheduler.is_paused, _scheduler.auto_apply, limit, _scheduler.manual_paused_platforms if _scheduler else set()),
+    )
+
+
+@router.callback_query(F.data == "models_menu")
+@admin_only
+async def cb_models_menu(callback: CallbackQuery, **kw):
+    await callback.answer()
+    await callback.message.edit_text(
+        f"🤖 <b>Выбор модели ИИ</b>\n\nТекущая модель: <code>{settings.llm_model}</code>\n\nВыберите модель из списка. Изменение применится немедленно и сохранится в <code>.env</code>:",
+        parse_mode="HTML",
+        reply_markup=models_keyboard(settings.llm_model)
+    )
+
+
+@router.callback_query(F.data.startswith("set_model:"))
+@admin_only
+async def cb_set_model(callback: CallbackQuery, **kw):
+    model = callback.data.split(":", 1)[1]
+    
+    try:
+        from app.config import save_env_variable
+        save_env_variable("LLM_MODEL", model)
+        settings.llm_model = model
+        claude_ai.set_model(model)
+        await callback.answer(f"Модель изменена на {model}")
+    except Exception as e:
+        await callback.answer(f"Ошибка сохранения: {e}", show_alert=True)
+        return
+        
+    await callback.message.edit_text(
+        f"🤖 <b>Выбор модели ИИ</b>\n\nТекущая модель: <code>{settings.llm_model}</code>\n\nВыберите модель из списка. Изменение применится немедленно и сохранится в <code>.env</code>:",
+        parse_mode="HTML",
+        reply_markup=models_keyboard(settings.llm_model)
     )
 
 @router.callback_query(F.data == "force_sync_sheets")

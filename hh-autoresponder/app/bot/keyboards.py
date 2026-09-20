@@ -101,6 +101,9 @@ def settings_keyboard(is_paused: bool = False, auto_apply: bool = False, limit: 
             InlineKeyboardButton(text="💬 Чат hh.ru (Бета)", callback_data="hh_chat_menu"),
             InlineKeyboardButton(text="🎛 Настройка функций", callback_data="behavior_menu"),
         ],
+        [
+            InlineKeyboardButton(text="🤖 Выбор ИИ модели", callback_data="models_menu"),
+        ],
     ])
 
 
@@ -151,9 +154,10 @@ def limits_keyboard(current: int) -> InlineKeyboardMarkup:
 
 
 GEMINI_MODELS = [
-    ("gemini-3.6-flash", "⚡️ gemini-3.6-flash (Основная)"),
     ("gemini-3.8-flash", "🚀 gemini-3.8-flash (Новейшая)"),
-    ("gemini-3.5-flash", "🔹 gemini-3.5-flash (Быстрая)"),
+    ("gemini-3.7-flash", "🌟 gemini-3.7-flash (Сбалансированная)"),
+    ("gemini-3.6-flash", "⚡️ gemini-3.6-flash (Основная)"),
+    ("gemini-3.5-flash-lite", "🍃 gemini-3.5-flash-lite (Лимит 500/д)"),
 ]
 
 OPENROUTER_FREE_MODELS = [
@@ -288,3 +292,19 @@ def hh_chat_menu_keyboard(is_running: bool = False) -> InlineKeyboardMarkup:
     ])
 
 
+def models_keyboard(current_model: str) -> InlineKeyboardMarkup:
+    """Меню для выбора модели ИИ."""
+    models = [
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash-lite",
+        "gemma-4-31b",
+        "gemma-3-27b",
+        "openrouter", # Or a generic custom one, but let's stick to google for now
+    ]
+    rows = []
+    for m in models:
+        text = f"✅ {m}" if m == current_model else m
+        rows.append([InlineKeyboardButton(text=text, callback_data=f"set_model:{m}")])
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
