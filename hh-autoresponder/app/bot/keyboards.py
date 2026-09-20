@@ -305,7 +305,18 @@ def hh_chat_list_keyboard(chats: list[dict]) -> InlineKeyboardMarkup:
     rows = []
     # Показываем только первые 10 чатов, чтобы не перегружать интерфейс Telegram
     for c in chats[:10]:
-        company = c.get("company") or "Неизвестная компания"
+        title = c.get("title", "")
+        company = c.get("company", "")
+        
+        # Если company содержит только время (например, "01:43" или "вчера"), 
+        # то скорее всего настоящее название компании или вакансии находится в title
+        label = title
+        if company and not company.replace(":", "").isdigit() and company != "вчера":
+            label = f"{title} ({company})"
+        
+        if not label.strip():
+            label = "Неизвестный чат"
+            
         chat_id = c.get("chat_id")
         if not chat_id:
             continue
@@ -313,11 +324,11 @@ def hh_chat_list_keyboard(chats: list[dict]) -> InlineKeyboardMarkup:
         # Добавляем индикатор, если есть непрочитанные сообщения
         marker = "🔴 " if c.get("has_unread") else "💬 "
         
-        # Обрезаем название компании, чтобы влезло в кнопку
-        if len(company) > 35:
-            company = company[:32] + "..."
+        # Обрезаем название, чтобы влезло в кнопку
+        if len(label) > 35:
+            label = label[:32] + "..."
             
-        rows.append([InlineKeyboardButton(text=f"{marker}{company}", callback_data=f"hh_sel_chat:{chat_id}")])
+        rows.append([InlineKeyboardButton(text=f"{marker}{label}", callback_data=f"hh_sel_chat:{chat_id}")])
         
     rows.append([InlineKeyboardButton(text="🔄 Обновить список", callback_data="hh_chat_list")])
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="hh_chat_menu")])
