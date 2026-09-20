@@ -124,11 +124,7 @@ OPENROUTER_FREE_FALLBACK_MODELS = [
     "deepseek/deepseek-v4-flash-0731:free",
 ]
 
-GEMINI_FALLBACK_MODELS = [
-    "gemini-3.6-flash",
-    "gemini-3.8-flash",
-    "gemini-3.5-flash",
-]
+
 
 
 class ClaudeAI:
@@ -206,7 +202,8 @@ class ClaudeAI:
                 if fb not in fallback_chain:
                     fallback_chain.append(fb)
         elif "generativelanguage" in settings.llm_base_url:
-            for fb in GEMINI_FALLBACK_MODELS:
+            live_models = await fetch_live_google_models()
+            for fb in live_models:
                 if fb not in fallback_chain:
                     fallback_chain.append(fb)
 
