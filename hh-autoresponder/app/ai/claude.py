@@ -202,6 +202,17 @@ class ClaudeAI:
                 if fb not in fallback_chain:
                     fallback_chain.append(fb)
         elif "generativelanguage" in settings.llm_base_url:
+            google_preset = [
+                "gemini-3.8-flash",
+                "gemini-3.7-flash",
+                "gemini-3.6-flash",
+                "gemini-3.5-flash-lite",
+                "gemini-3.5-flash"
+            ]
+            for fb in google_preset:
+                if fb not in fallback_chain:
+                    fallback_chain.append(fb)
+
             live_models = await fetch_live_google_models()
             for fb in live_models:
                 if fb not in fallback_chain:
