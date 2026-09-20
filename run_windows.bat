@@ -6,11 +6,24 @@ cd /d "%~dp0"
 echo Проверка наличия Python...
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo [ОШИБКА] Python не установлен или не добавлен в PATH!
-    echo Пожалуйста, скачайте Python 3.12+ с сайта python.org
-    echo При установке ОБЯЗАТЕЛЬНО поставьте галочку "Add Python to PATH".
-    pause
-    exit /b
+    echo [ВНИМАНИЕ] Python не установлен или не добавлен в PATH!
+    echo Выполняется автоматическое скачивание Python 3.12...
+    curl -L -o python_installer.exe https://www.python.org/ftp/python/3.12.3/python-3.12.3-amd64.exe
+    if exist python_installer.exe (
+        echo Установка Python (в тихом режиме, это займет около минуты)...
+        start /wait python_installer.exe /quiet InstallAllUsers=0 PrependPath=1 Include_test=0
+        del python_installer.exe
+        echo.
+        echo [УСПЕХ] Python успешно установлен!
+        echo ВАЖНО: Окно нужно перезапустить, чтобы пути обновились.
+        echo Закройте это окно и запустите run_windows.bat заново!
+        pause
+        exit /b
+    ) else (
+        echo [ОШИБКА] Не удалось скачать установщик. Пожалуйста, скачайте Python 3.12+ с сайта python.org
+        pause
+        exit /b
+    )
 )
 
 echo Создание виртуального окружения...
