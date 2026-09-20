@@ -138,14 +138,17 @@ def clear_neg_keyboard() -> InlineKeyboardMarkup:
 def limits_keyboard(current: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="-10", callback_data="set_limit:-10"),
-            InlineKeyboardButton(text="+10", callback_data="set_limit:+10"),
+            InlineKeyboardButton(text="-5", callback_data="set_limit:-5"),
+            InlineKeyboardButton(text="+5", callback_data="set_limit:+5"),
         ],
         [
+            InlineKeyboardButton(text="25", callback_data="set_limit:25_abs"),
+            InlineKeyboardButton(text="40", callback_data="set_limit:40_abs"),
             InlineKeyboardButton(text="50", callback_data="set_limit:50_abs"),
-            InlineKeyboardButton(text="100", callback_data="set_limit:100_abs"),
-            InlineKeyboardButton(text="150", callback_data="set_limit:150_abs"),
-            InlineKeyboardButton(text="200", callback_data="set_limit:200_abs"),
+            InlineKeyboardButton(text="75", callback_data="set_limit:75_abs"),
+        ],
+        [
+            InlineKeyboardButton(text="✏️ Ввести своё число", callback_data="set_limit:custom"),
         ],
         [
             InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back"),
