@@ -152,13 +152,22 @@ class HHChatParser:
         if not self._page or self._page.is_closed():
             ok = await self.start(headless=True)
             if not ok:
+                log.warning("hh_chat_start_failed_in_get_chats")
                 return []
 
         async with self._lock:
             try:
-                if "/chat" not in self._page.url:
-                    await self._page.goto(HH_CHAT_URL, wait_until="domcontentloaded", timeout=30000)
+                curr_url = self._page.url.rstrip("/")
+                target_root = HH_CHAT_URL.rstrip("/")
+                # Если открыт конкретный чат (hh.ru/chat/12345), возвращаемся в корень чатов
+                if curr_url != target_root:
+                    log.info("hh_chat_navigating_to_root_list", from_url=curr_url, to_url=target_root)
+                    await self._page.goto(HH_CHAT_URL, wait_until="domcontentloaded", timeout=20000)
                     await self._page.wait_for_timeout(2000)
+                else:
+                    log.debug("hh_chat_reloading_list")
+                    await self._page.reload(wait_until="domcontentloaded", timeout=20000)
+                    await self._page.wait_for_timeout(1500)
 
                 # JS для извлечения карточек чатов
                 _CHATS_JS = r"""() => {
@@ -201,6 +210,15 @@ class HHChatParser:
                 for c in chats:
                     if is_rejection_text(c.get("last_message", "")) or is_rejection_text(c.get("company", "")):
                         c["is_rejection"] = True
+
+                unread_cnt = sum(1 for c in chats if c.get("has_unread") and not c.get("is_rejection"))
+                reject_cnt = sum(1 for c in chats if c.get("is_rejection"))
+                log.info(
+                    "hh_chat_list_scanned",
+                    total=len(chats),
+                    unread=unread_cnt,
+                    rejections=reject_cnt,
+                )
                 return chats
             except Exception as e:
                 log.warning("hh_chat_get_list_error", error=str(e))
@@ -211,14 +229,16 @@ class HHChatParser:
         if not self._page or self._page.is_closed():
             ok = await self.start(headless=True)
             if not ok:
+                log.warning("hh_chat_start_failed_in_inspect", chat_id=chat_id)
                 return None
 
         async with self._lock:
             try:
                 target_url = f"https://hh.ru/chat/{chat_id}"
+                log.info("hh_chat_inspecting_dialog", chat_id=chat_id, target_url=target_url)
                 if target_url not in self._page.url:
-                    await self._page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
-                    await self._page.wait_for_timeout(3000)
+                    await self._page.goto(target_url, wait_until="domcontentloaded", timeout=25000)
+                    await self._page.wait_for_timeout(2500)
 
                 # JS для парсинга сообщений и быстрых кнопок
                 _INSPECT_JS = r"""() => {
@@ -310,11 +330,24 @@ class HHChatParser:
                 }"""
                 data = await self._page.evaluate(_INSPECT_JS)
                 if not data:
+                    log.warning("hh_chat_inspect_eval_empty", chat_id=chat_id)
                     return None
 
                 data["chat_id"] = chat_id
                 if is_rejection_text(data.get("last_incoming_text", "")):
                     data["is_rejection"] = True
+
+                log.info(
+                    "hh_chat_inspect_done",
+                    chat_id=chat_id,
+                    company=data.get("company", ""),
+                    vacancy=data.get("vacancy", ""),
+                    last_incoming=(data.get("last_incoming_text", "") or "")[:60],
+                    is_outgoing=data.get("is_last_from_me"),
+                    is_rejection=data.get("is_rejection"),
+                    is_closed=data.get("is_closed"),
+                    options=data.get("options", []),
+                )
                 return data
 
             except Exception as e:
@@ -326,14 +359,16 @@ class HHChatParser:
         if not self._page or self._page.is_closed():
             ok = await self.start(headless=True)
             if not ok:
+                log.warning("hh_chat_start_failed_in_send_option")
                 return False
 
         async with self._lock:
             try:
                 target_url = f"https://hh.ru/chat/{chat_id}"
+                log.info("hh_chat_send_option_start", chat_id=chat_id, option=option_text)
                 if target_url not in self._page.url:
-                    await self._page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
-                    await self._page.wait_for_timeout(2500)
+                    await self._page.goto(target_url, wait_until="domcontentloaded", timeout=25000)
+                    await self._page.wait_for_timeout(2000)
 
                 clicked = await self._page.evaluate(r"""(optText) => {
                     const btns = document.querySelectorAll('button[class*="magritte-button"]');
@@ -348,13 +383,13 @@ class HHChatParser:
                 }""", option_text)
 
                 if clicked:
-                    log.info("hh_chat_option_clicked", chat_id=chat_id, option=option_text)
+                    log.info("hh_chat_option_clicked_successfully", chat_id=chat_id, option=option_text)
                     await self._page.wait_for_timeout(2000)
                     # Сохраняем обновленные куки
                     await self._context.storage_state(path=str(self.storage_path))
                     return True
                 else:
-                    log.warning("hh_chat_option_not_found", chat_id=chat_id, option=option_text)
+                    log.warning("hh_chat_option_not_found_on_page", chat_id=chat_id, option=option_text)
                     return False
 
             except Exception as e:
@@ -366,14 +401,16 @@ class HHChatParser:
         if not self._page or self._page.is_closed():
             ok = await self.start(headless=True)
             if not ok:
+                log.warning("hh_chat_start_failed_in_send_message")
                 return False
 
         async with self._lock:
             try:
                 target_url = f"https://hh.ru/chat/{chat_id}"
+                log.info("hh_chat_send_message_start", chat_id=chat_id, text_len=len(text), preview=text[:60])
                 if target_url not in self._page.url:
-                    await self._page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
-                    await self._page.wait_for_timeout(2500)
+                    await self._page.goto(target_url, wait_until="domcontentloaded", timeout=25000)
+                    await self._page.wait_for_timeout(2000)
 
                 ta = await self._page.query_selector('textarea[data-qa="text-input"], textarea')
                 if not ta:
@@ -391,7 +428,7 @@ class HHChatParser:
                 else:
                     await ta.press("Enter")
 
-                log.info("hh_chat_message_sent", chat_id=chat_id, length=len(text))
+                log.info("hh_chat_message_sent_successfully", chat_id=chat_id, length=len(text))
                 await self._page.wait_for_timeout(2500)
                 await self._context.storage_state(path=str(self.storage_path))
                 return True
