@@ -1,5 +1,7 @@
 @echo off
 chcp 65001 >nul
+goto :start_script
+:start_script
 set PYTHONUTF8=1
 cd /d "%~dp0"
 
