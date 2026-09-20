@@ -98,6 +98,7 @@ def settings_keyboard(is_paused: bool = False, auto_apply: bool = False, limit: 
             InlineKeyboardButton(text="💬 Скринер MAX", callback_data="screener_menu"),
         ],
         [
+            InlineKeyboardButton(text="💬 Чат hh.ru", callback_data="hh_chat_menu"),
             InlineKeyboardButton(text="🎛 Настройка функций", callback_data="behavior_menu"),
         ],
     ])
@@ -226,4 +227,49 @@ def screener_menu_keyboard(is_running: bool = False) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🔄 Проверить чат сейчас", callback_data="screener_poll")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back")],
     ])
+
+
+def hh_chat_card_keyboard(options: list[str] | None = None, recommended_option: str | None = None, has_pending: bool = True) -> InlineKeyboardMarkup:
+    """Клавиатура для ответа на вопрос в чате HeadHunter."""
+    rows = []
+    
+    # Кнопки быстрых вариантов выбора (если рекрутер задал опрос с выбором)
+    if options and has_pending:
+        opt_buttons = []
+        for i, opt in enumerate(options):
+            is_rec = recommended_option and (opt.lower() in recommended_option.lower() or recommended_option.lower() in opt.lower())
+            mark = "⭐️ " if is_rec else ""
+            btn = InlineKeyboardButton(text=f"{mark}{opt}", callback_data=f"hh_opt:{i}")
+            opt_buttons.append(btn)
+        
+        # Разбиваем по 2 кнопки в ряд
+        for i in range(0, len(opt_buttons), 2):
+            rows.append(opt_buttons[i:i+2])
+
+    if has_pending:
+        rows.append([
+            InlineKeyboardButton(text="📨 Отправить AI-ответ", callback_data="hh_send_ai"),
+            InlineKeyboardButton(text="✏️ Редактировать", callback_data="hh_edit"),
+        ])
+        rows.append([
+            InlineKeyboardButton(text="🔄 Другой вариант", callback_data="hh_regen"),
+            InlineKeyboardButton(text="⏭ Пропустить", callback_data="hh_skip"),
+        ])
+    
+    rows.append([
+        InlineKeyboardButton(text="🔄 Проверить чаты hh.ru", callback_data="hh_poll"),
+        InlineKeyboardButton(text="🛑 Закрыть", callback_data="hh_stop"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def hh_chat_menu_keyboard(is_running: bool = False) -> InlineKeyboardMarkup:
+    """Меню управления автоответами в чатах HeadHunter."""
+    toggle_text = "⏹ Остановить мониторинг" if is_running else "▶️ Запустить автомониторинг hh.ru"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=toggle_text, callback_data="hh_chat_toggle")],
+        [InlineKeyboardButton(text="🔍 Проверить чаты сейчас", callback_data="hh_poll")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back")],
+    ])
+
 
