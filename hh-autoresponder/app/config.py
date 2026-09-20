@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     gemini_api_key: str = ""
     openrouter_api_key: str = ""
-    llm_model: str = "deepseek/deepseek-chat"
+    llm_model: str = "nex-agi/nex-n2.5-pro:free"
     llm_max_tokens_floor: int = 2000
     llm_proxy: str = ""                                 # socks5:// или http:// прокси для LLM (опц.)
 
@@ -105,10 +105,10 @@ class Settings(BaseSettings):
                 self.openrouter_api_key = self.llm_api_key
             elif (self.llm_api_key.startswith("AIza") or self.llm_api_key.startswith("AQ.")) and not self.gemini_api_key:
                 self.gemini_api_key = self.llm_api_key
-        # Для OpenRouter используем стабильный DeepSeek V3
+        # Для OpenRouter по умолчанию используем стабильную бесплатную модель
         if "openrouter" in self.llm_base_url:
-            if "deepseek-v4" in self.llm_model or "gemini" in self.llm_model:
-                self.llm_model = "deepseek/deepseek-chat"
+            if "gemini" in self.llm_model:
+                self.llm_model = "nex-agi/nex-n2.5-pro:free"
         return self
 
     # ── Темп / антибан ────────────────────────────────────────

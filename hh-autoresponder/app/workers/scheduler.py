@@ -44,7 +44,7 @@ class WorkerScheduler:
         if "selected_llm_model" in state:
             saved_model = state["selected_llm_model"]
             if "openrouter" in settings.llm_base_url and ("gemini" in saved_model or "deepseek-v4" in saved_model):
-                settings.llm_model = "deepseek/deepseek-chat"
+                settings.llm_model = "nex-agi/nex-n2.5-pro:free"
             else:
                 settings.llm_model = saved_model
         self.min_ai_score = 30

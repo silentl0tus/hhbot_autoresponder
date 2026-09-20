@@ -156,9 +156,23 @@ GEMINI_MODELS = [
     ("gemini-3.5-flash", "🔹 gemini-3.5-flash (Быстрая)"),
 ]
 
+OPENROUTER_FREE_MODELS = [
+    ("nex-agi/nex-n2.5-pro:free", "⚡️ NEX N2.5 Pro (Free, быстрая)"),
+    ("nex-agi/nex-n2.5-mini:free", "🚀 NEX N2.5 Mini (Free, легковесная)"),
+    ("liquid/lfm-2.5-2.6b:free", "💧 Liquid LFM 2.5 (Free)"),
+    ("inclusionai/ling-3.0-flash-vl:free", "⚡️ Ling 3.0 Flash (Free)"),
+    ("qwen/qwen3.8-27b:free", "🧠 Qwen 3.8 27B (Free)"),
+    ("google/gemma-4-31b-it:free", "🔹 Gemma 4 31B (Free)"),
+    ("google/gemma-4-26b-a4b-it:free", "🔹 Gemma 4 26B (Free)"),
+    ("nvidia/nemotron-3.5-lightning:free", "⚡️ Nemotron 3.5 (Free)"),
+    ("z-ai/glm-5.2:free", "🌐 GLM 5.2 (Free)"),
+    ("deepseek/deepseek-v4-flash-0731:free", "🤖 DeepSeek v4 (Free)"),
+]
+
 OPENROUTER_MODELS = [
-    ("deepseek/deepseek-chat", "⚡️ DeepSeek V3 (Быстрая и стабильная)"),
-    ("deepseek/deepseek-r1", "🧠 DeepSeek R1 (Reasoning)"),
+    *OPENROUTER_FREE_MODELS,
+    ("deepseek/deepseek-chat", "💎 DeepSeek V3 (Платная)"),
+    ("deepseek/deepseek-r1", "🧠 DeepSeek R1 (Reasoning, платная)"),
 ]
 
 KNOWN_MODELS = GEMINI_MODELS

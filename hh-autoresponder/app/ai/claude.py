@@ -67,6 +67,26 @@ def clean_screener_answer(text: str) -> str:
     return result
 
 
+OPENROUTER_FREE_FALLBACK_MODELS = [
+    "nex-agi/nex-n2.5-pro:free",
+    "nex-agi/nex-n2.5-mini:free",
+    "liquid/lfm-2.5-2.6b:free",
+    "inclusionai/ling-3.0-flash-vl:free",
+    "qwen/qwen3.8-27b:free",
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "nvidia/nemotron-3.5-lightning:free",
+    "z-ai/glm-5.2:free",
+    "deepseek/deepseek-v4-flash-0731:free",
+]
+
+GEMINI_FALLBACK_MODELS = [
+    "gemini-3.6-flash",
+    "gemini-3.8-flash",
+    "gemini-3.5-flash",
+]
+
+
 class ClaudeAI:
     """Опциональный LLM-помощник (OpenAI-совместимый эндпоинт, напр. polza.ai).
 
@@ -132,34 +152,83 @@ class ClaudeAI:
         # щедрый нижний порог, иначе видимый ответ приходит пустым.
         if max_tokens < self._floor:
             max_tokens = self._floor
-        payload = {
-            "model": model or settings.llm_model,
-            "max_tokens": max_tokens,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user_message},
-            ],
-        }
-        try:
-            resp = await self._client.post("/chat/completions", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-        except httpx.HTTPStatusError as e:
-            self.last_error = f"HTTP {e.response.status_code}: {e.response.text[:200]}"
-            log.warning("llm_call_error", error=self.last_error)
-            return "", 0, 0
-        except Exception as e:
-            self.last_error = f"{type(e).__name__}: {str(e)[:200]}"
-            log.warning("llm_call_error", error=self.last_error)
-            return "", 0, 0
 
-        choice = (data.get("choices") or [{}])[0]
-        msg = choice.get("message") or {}
-        text = msg.get("content") or ""
-        if not text and msg.get("reasoning"):
-            text = msg.get("reasoning")
-        usage = data.get("usage") or {}
-        return text, int(usage.get("prompt_tokens", 0) or 0), int(usage.get("completion_tokens", 0) or 0)
+        primary_model = model or settings.llm_model
+        fallback_chain: list[str] = [primary_model]
+
+        is_openrouter = "openrouter" in settings.llm_base_url
+        if is_openrouter:
+            for fb in OPENROUTER_FREE_FALLBACK_MODELS:
+                if fb not in fallback_chain:
+                    fallback_chain.append(fb)
+        elif "generativelanguage" in settings.llm_base_url:
+            for fb in GEMINI_FALLBACK_MODELS:
+                if fb not in fallback_chain:
+                    fallback_chain.append(fb)
+
+        last_error_text = ""
+
+        for attempt_idx, candidate_model in enumerate(fallback_chain):
+            payload = {
+                "model": candidate_model,
+                "max_tokens": max_tokens,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user_message},
+                ],
+            }
+            try:
+                resp = await self._client.post("/chat/completions", json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+
+                choice = (data.get("choices") or [{}])[0]
+                msg = choice.get("message") or {}
+                text = msg.get("content") or ""
+                if not text and msg.get("reasoning"):
+                    text = msg.get("reasoning")
+
+                if text:
+                    # Если ответ получен через fallback-модель, автоматически переключаем активную модель
+                    if candidate_model != primary_model:
+                        log.info(
+                            "llm_fallback_switched",
+                            prev_model=primary_model,
+                            new_model=candidate_model,
+                            attempt=attempt_idx + 1,
+                        )
+                        self.set_model(candidate_model)
+
+                    usage = data.get("usage") or {}
+                    return (
+                        text,
+                        int(usage.get("prompt_tokens", 0) or 0),
+                        int(usage.get("completion_tokens", 0) or 0),
+                    )
+                else:
+                    last_error_text = f"Модель {candidate_model} вернула пустой контент"
+                    log.warning("llm_empty_response", model=candidate_model)
+            except httpx.HTTPStatusError as e:
+                last_error_text = f"HTTP {e.response.status_code} ({candidate_model}): {e.response.text[:150]}"
+                log.warning(
+                    "llm_call_error_trying_fallback",
+                    model=candidate_model,
+                    status_code=e.response.status_code,
+                    attempt=attempt_idx + 1,
+                    total_candidates=len(fallback_chain),
+                    error=last_error_text,
+                )
+            except Exception as e:
+                last_error_text = f"{type(e).__name__} ({candidate_model}): {str(e)[:150]}"
+                log.warning(
+                    "llm_call_error_trying_fallback",
+                    model=candidate_model,
+                    error=last_error_text,
+                    attempt=attempt_idx + 1,
+                )
+
+        self.last_error = last_error_text or "Все модели в цепочке fallback завершились ошибкой"
+        return "", 0, 0
 
     async def generate_cover_letter(self, vacancy_title: str, vacancy_description: str, company_name: str = "", humanize: bool = False) -> tuple[str, int, int]:
         if not _ai_ready():
