@@ -85,7 +85,9 @@ def _sync_statuses_sync(parsed_statuses: list[dict]):
     STATUS_MAPPING = {
         "discard": "Отказ",
         "invitations": "Приглашение",
-        "pending": "Ждем ответа"
+        "invitation": "Приглашение",
+        "pending": "Ждем ответа",
+        "response": "Ждем ответа",
     }
 
     try:
@@ -98,56 +100,102 @@ def _sync_statuses_sync(parsed_statuses: list[dict]):
         
         # Build mapping of vacancy_id -> status
         update_map = {}
+        log.info("google_sheets_sync_input", raw_count=len(parsed_statuses))
+        
         for s in parsed_statuses:
-            tab = s.get("tab")
-            new_status = STATUS_MAPPING.get(tab)
+            tab = (s.get("tab") or "").lower()
+            status = (s.get("status") or "").lower()
+            new_status = STATUS_MAPPING.get(tab) or STATUS_MAPPING.get(status)
             if not new_status:
+                log.debug("google_sheets_sync_ignored_status", tab=tab, status=status)
                 continue
                 
-            href = s.get("vacancy_url", "")
-            m = re.search(r"vacancy(?:Id=|/)(\d+)", href)
-            if m:
-                vac_id = m.group(1)
+            vac_id = str(s.get("vacancy_id") or "")
+            if not vac_id:
+                href = s.get("vacancy_url", "")
+                m = re.search(r"vacancy(?:Id=|/)(\d+)", href)
+                if m:
+                    vac_id = m.group(1)
+            if vac_id:
                 update_map[vac_id] = new_status
 
+        log.info("google_sheets_sync_mapped", mapped_count=len(update_map))
+
         if not update_map:
-            return
+            return 0
 
         # Fetch all rows to find matches
         all_values = worksheet.get_all_values()
+        if not all_values:
+            return 0
+            
+        header = all_values[0]
+        # Попробуем найти колонки по названию, иначе используем старые индексы (1 и 7)
+        try:
+            url_idx = next(i for i, v in enumerate(header) if "ссылка" in v.lower() and "описание" in v.lower())
+        except StopIteration:
+            url_idx = 1
+            
+        try:
+            status_idx = next(i for i, v in enumerate(header) if "статус" in v.lower())
+        except StopIteration:
+            status_idx = 7
+            
+        log.info("google_sheets_sync_columns", url_col=url_idx, status_col=status_idx)
         
         updates = []
+        matched_in_sheet = 0
+        
         for i, row in enumerate(all_values):
             if i == 0:  # Header
                 continue
             
-            url_col = row[1] if len(row) > 1 else ""
-            current_status = row[7] if len(row) > 7 else ""
+            url_col = row[url_idx] if len(row) > url_idx else ""
+            current_status = row[status_idx] if len(row) > status_idx else ""
                 
             m = re.search(r"vacancy(?:Id=|/)(\d+)", url_col)
             if m:
                 vac_id = m.group(1)
                 new_status = update_map.get(vac_id)
                 
-                if new_status and new_status != current_status:
-                    # Row is i+1 (1-based index)
-                    # Column is H (8th column)
-                    cell_label = f"H{i+1}"
-                    updates.append({
-                        'range': cell_label,
-                        'values': [[new_status]]
-                    })
+                if new_status:
+                    matched_in_sheet += 1
+                    if new_status != current_status:
+                        # Row is i+1 (1-based index)
+                        # Column is letter (A=1, B=2, etc.)
+                        # Convert status_idx to Excel column letter
+                        def col_num_to_letter(n):
+                            string = ""
+                            while n > 0:
+                                n, remainder = divmod(n - 1, 26)
+                                string = chr(65 + remainder) + string
+                            return string
+                            
+                        col_letter = col_num_to_letter(status_idx + 1)
+                        cell_label = f"{col_letter}{i+1}"
+                        updates.append({
+                            'range': cell_label,
+                            'values': [[new_status]]
+                        })
+
+        log.info("google_sheets_sync_sheet_matches", matched=matched_in_sheet, to_update=len(updates))
 
         if updates:
             worksheet.batch_update(updates, value_input_option='USER_ENTERED')
             log.info("google_sheets_statuses_synced", count=len(updates))
+            return len(updates)
+        else:
+            log.info("google_sheets_statuses_synced", count=0, message="No changes needed")
+        return 0
 
     except Exception as e:
         log.error("google_sheets_sync_error", error=str(e))
+        return 0
 
-async def sync_statuses_to_sheets(parsed_statuses: list[dict]):
+async def sync_statuses_to_sheets(parsed_statuses: list[dict]) -> int:
     """
     Asynchronously syncs parsed HH.ru statuses to Google Sheets.
-    parsed_statuses: list of dicts from hh_playwright.check_negotiations_status()
+    parsed_statuses: list of dicts from hh_oauth.negotiations_status() or hh_playwright.check_negotiations_status()
+    Returns count of updated rows.
     """
-    await asyncio.to_thread(_sync_statuses_sync, parsed_statuses)
+    return await asyncio.to_thread(_sync_statuses_sync, parsed_statuses)
