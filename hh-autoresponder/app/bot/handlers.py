@@ -2108,25 +2108,62 @@ async def _hh_chat_background_monitor(bot):
 
     while _hh_chat_state.get("is_monitoring", False):
         try:
-            if not _hh_chat_state.get("waiting_for_user_action", False):
+            if _hh_chat_state.get("waiting_for_user_action", False):
+                log.info(
+                    "hh_chat_monitor_idle_waiting_user_choice",
+                    company=_hh_chat_state.get("company"),
+                    vacancy=_hh_chat_state.get("vacancy"),
+                    last_question=(_hh_chat_state.get("question", "") or "")[:50],
+                )
+            else:
+                log.info("hh_chat_monitor_tick_scanning")
                 chats = await hh_chat_parser.get_unread_or_active_chats()
                 unread_chats = [c for c in chats if c.get("has_unread") and not c.get("is_rejection")]
+                
+                # Если с бейджем непрочитанных чатов нет, проверяем первые 3 активных чата
+                # (на случай, если пользователь уже открывал браузер или hh.ru снял бейдж)
+                candidate_chats = unread_chats if unread_chats else [c for c in chats[:3] if not c.get("is_rejection")]
 
-                for target_chat in unread_chats:
+                found_question = False
+                for target_chat in candidate_chats:
                     chat_id = target_chat.get("chat_id")
                     if not chat_id:
                         continue
+                    
+                    log.info("hh_chat_monitor_inspecting", chat_id=chat_id, company=target_chat.get("company"))
                     details = await hh_chat_parser.inspect_chat(chat_id)
-                    if not details or details.get("is_rejection") or details.get("is_closed") or details.get("is_last_from_me"):
+                    if not details:
+                        log.warning("hh_chat_monitor_inspect_empty", chat_id=chat_id)
+                        continue
+                    if details.get("is_rejection"):
+                        log.info("hh_chat_monitor_skip_rejection", chat_id=chat_id, company=details.get("company"))
+                        continue
+                    if details.get("is_closed"):
+                        log.info("hh_chat_monitor_skip_closed", chat_id=chat_id, company=details.get("company"))
+                        continue
+                    if details.get("is_last_from_me"):
+                        log.debug("hh_chat_monitor_skip_last_from_me", chat_id=chat_id, company=details.get("company"))
                         continue
 
                     question = details.get("last_incoming_text") or target_chat.get("last_message", "")
                     if not question:
+                        log.debug("hh_chat_monitor_skip_no_question_text", chat_id=chat_id)
                         continue
 
                     notif_key = f"{chat_id}_{question}"
                     if notif_key == _hh_chat_state.get("last_notified_key"):
+                        log.debug("hh_chat_monitor_skip_already_notified", notif_key=notif_key)
                         continue
+
+                    found_question = True
+                    log.info(
+                        "hh_chat_monitor_question_captured",
+                        chat_id=chat_id,
+                        company=details.get("company"),
+                        vacancy=details.get("vacancy"),
+                        question=question[:80],
+                        options_count=len(details.get("options", [])),
+                    )
 
                     _hh_chat_state["waiting_for_user_action"] = True
                     _hh_chat_state["hh_chat_id"] = chat_id
@@ -2135,6 +2172,7 @@ async def _hh_chat_background_monitor(bot):
                     _hh_chat_state["vacancy"] = details.get("vacancy") or target_chat.get("title", "")
                     _hh_chat_state["question"] = question
                     _hh_chat_state["options"] = details.get("options", [])
+
                     tg_chat_id = _hh_chat_state.get("chat_id") or settings.tg_admin_chat_id
                     status_msg = None
                     if tg_chat_id:
@@ -2154,6 +2192,7 @@ async def _hh_chat_background_monitor(bot):
                         except Exception as e:
                             log.warning("hh_chat_temp_msg_error", error=str(e))
 
+                    log.info("hh_chat_monitor_generating_ai_start")
                     answer, rec_opt, _, _ = await claude_ai.generate_hh_answer(
                         question=question,
                         options=_hh_chat_state["options"],
@@ -2161,6 +2200,8 @@ async def _hh_chat_background_monitor(bot):
                         company_name=_hh_chat_state["company"],
                         humanize=True,
                     )
+                    log.info("hh_chat_monitor_generating_ai_done", rec_opt=rec_opt, answer_preview=answer[:60])
+
                     _hh_chat_state["suggested_answer"] = answer
                     _hh_chat_state["recommended_option"] = rec_opt
 
@@ -2194,7 +2235,12 @@ async def _hh_chat_background_monitor(bot):
                                 parse_mode="HTML",
                                 reply_markup=kb,
                             )
+                    log.info("hh_chat_monitor_card_posted_waiting_user_action")
                     break
+
+                if not found_question:
+                    log.info("hh_chat_monitor_tick_no_new_questions")
+
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -2276,15 +2322,21 @@ async def cb_hh_chat_toggle(callback: CallbackQuery, **kw):
 @router.callback_query(F.data == "hh_poll")
 @admin_only
 async def cb_hh_poll(callback: CallbackQuery, **kw):
+    log.info("hh_chat_manual_poll_requested", user_id=callback.from_user.id)
+    # Сбрасываем флаг ожидания, чтобы ручная проверка всегда принудительно опрашивала чаты
+    _hh_chat_state["waiting_for_user_action"] = False
+
     await callback.answer("🔍 Проверяю чаты на hh.ru...")
     status_msg = await callback.message.answer("⏳ <i>Сканирую список чатов hh.ru...</i>", parse_mode="HTML")
 
     if not hh_chat_parser.is_session_available():
+        log.warning("hh_chat_manual_poll_no_session")
         await status_msg.edit_text("❌ Нет сохраненной сессии hh.ru. Сначала пройдите авторизацию.")
         return
 
     chats = await hh_chat_parser.get_unread_or_active_chats()
     if not chats:
+        log.warning("hh_chat_manual_poll_no_chats")
         await status_msg.edit_text("📭 Чаты на hh.ru не найдены или сессия не авторизована.")
         return
 
@@ -2292,10 +2344,13 @@ async def cb_hh_poll(callback: CallbackQuery, **kw):
     target_details = None
 
     unread_chats = [c for c in chats if c.get("has_unread") and not c.get("is_rejection")]
+    log.info("hh_chat_manual_poll_chats", total=len(chats), unread=len(unread_chats))
+
     for c in unread_chats:
         cid = c.get("chat_id")
         if not cid:
             continue
+        log.info("hh_chat_manual_poll_inspecting_unread", chat_id=cid, company=c.get("company"))
         details = await hh_chat_parser.inspect_chat(cid)
         if details and not details.get("is_rejection") and not details.get("is_closed") and not details.get("is_last_from_me") and details.get("last_incoming_text"):
             target_chat = c
@@ -2303,12 +2358,14 @@ async def cb_hh_poll(callback: CallbackQuery, **kw):
             break
 
     if not target_chat:
-        # Проверяем первые 5 чатов на входящие сообщения, пропуская явные отказы
+        log.info("hh_chat_manual_poll_checking_recent_chats")
         for c in chats[:5]:
             if c.get("is_rejection"):
+                log.debug("hh_chat_manual_poll_skip_rejection_in_list", company=c.get("company"))
                 continue
             cid = c.get("chat_id")
             if cid:
+                log.info("hh_chat_manual_poll_inspecting_recent", chat_id=cid, company=c.get("company"))
                 details = await hh_chat_parser.inspect_chat(cid)
                 if details and not details.get("is_rejection") and not details.get("is_closed") and not details.get("is_last_from_me") and details.get("last_incoming_text"):
                     target_chat = c
@@ -2316,6 +2373,7 @@ async def cb_hh_poll(callback: CallbackQuery, **kw):
                     break
 
     if not target_chat or not target_details:
+        log.info("hh_chat_manual_poll_no_active_questions_found")
         await status_msg.edit_text("✅ Все активные чаты проверены. Ожидающих вопросов нет (отказы и закрытые диалоги пропущены).")
         return
 
@@ -2323,6 +2381,7 @@ async def cb_hh_poll(callback: CallbackQuery, **kw):
     details = target_details
     question = details.get("last_incoming_text") or target_chat.get("last_message", "")
     if not question:
+        log.info("hh_chat_manual_poll_no_incoming_text", chat_id=chat_id)
         await status_msg.edit_text("✅ В этом диалоге нет вопросов от работодателя.")
         return
 
@@ -2330,6 +2389,15 @@ async def cb_hh_poll(callback: CallbackQuery, **kw):
     company = details.get("company") or target_chat.get("company", "") or target_chat.get("last_message", "")
     vacancy = details.get("vacancy") or target_chat.get("title", "")
     options = details.get("options", [])
+
+    log.info(
+        "hh_chat_manual_poll_target_found",
+        chat_id=chat_id,
+        company=company,
+        vacancy=vacancy,
+        question=question[:80],
+        options_count=len(options),
+    )
 
     _hh_chat_state["waiting_for_user_action"] = True
     _hh_chat_state["hh_chat_id"] = chat_id
@@ -2348,6 +2416,7 @@ async def cb_hh_poll(callback: CallbackQuery, **kw):
         parse_mode="HTML",
     )
 
+    log.info("hh_chat_manual_poll_ai_generation_start")
     answer, rec_opt, _, _ = await claude_ai.generate_hh_answer(
         question=question,
         options=options,
@@ -2355,6 +2424,7 @@ async def cb_hh_poll(callback: CallbackQuery, **kw):
         company_name=company,
         humanize=True,
     )
+    log.info("hh_chat_manual_poll_ai_generation_done", rec_opt=rec_opt, answer_preview=answer[:60])
     _hh_chat_state["suggested_answer"] = answer
     _hh_chat_state["recommended_option"] = rec_opt
 
@@ -2364,6 +2434,7 @@ async def cb_hh_poll(callback: CallbackQuery, **kw):
         await status_msg.edit_text(card_text, parse_mode="HTML", reply_markup=kb)
     except Exception:
         await callback.message.answer(card_text, parse_mode="HTML", reply_markup=kb)
+    log.info("hh_chat_manual_poll_card_displayed")
 
 
 @router.callback_query(F.data.startswith("hh_opt:"))
@@ -2383,6 +2454,7 @@ async def cb_hh_opt(callback: CallbackQuery, **kw):
         await callback.answer("Чат не выбран", show_alert=True)
         return
 
+    log.info("hh_chat_user_selected_option", chat_id=chat_id, option=selected_opt)
     import html as _html
     await callback.answer(f"Выбран: {selected_opt[:30]}...")
     await callback.message.edit_text(
@@ -2392,6 +2464,7 @@ async def cb_hh_opt(callback: CallbackQuery, **kw):
 
     ok = await hh_chat_parser.send_option(chat_id, selected_opt)
     if ok:
+        log.info("hh_chat_option_sent_success", chat_id=chat_id, option=selected_opt)
         await callback.message.edit_text(
             f"✅ <b>Вариант успешно отправлен в чат hh.ru!</b>\n\n"
             f"🏢 <b>{_html.escape(_hh_chat_state.get('company', ''))}</b>\n"
@@ -2405,6 +2478,7 @@ async def cb_hh_opt(callback: CallbackQuery, **kw):
         _hh_chat_state["suggested_answer"] = ""
         _hh_chat_state["options"] = []
     else:
+        log.warning("hh_chat_option_send_failed", chat_id=chat_id, option=selected_opt)
         await callback.message.edit_text(
             "❌ <b>Не удалось нажать кнопку в чате браузера.</b> Попробуйте еще раз или отправьте текст.",
             parse_mode="HTML",
@@ -2425,6 +2499,7 @@ async def cb_hh_send_ai(callback: CallbackQuery, **kw):
         await callback.answer("Нет готового ответа или чат не выбран", show_alert=True)
         return
 
+    log.info("hh_chat_user_sent_ai_button", chat_id=chat_id, answer_preview=answer[:60])
     import html as _html
     await callback.answer("📨 Отправляю ответ в чат hh.ru...")
     await callback.message.edit_text(
@@ -2433,6 +2508,7 @@ async def cb_hh_send_ai(callback: CallbackQuery, **kw):
     )
     ok = await hh_chat_parser.send_text_message(chat_id, answer)
     if ok:
+        log.info("hh_chat_ai_text_sent_success", chat_id=chat_id)
         await callback.message.edit_text(
             f"✅ <b>Ответ успешно отправлен в чат hh.ru!</b>\n\n"
             f"🏢 <b>{_html.escape(_hh_chat_state.get('company', ''))}</b>\n"
@@ -2446,6 +2522,7 @@ async def cb_hh_send_ai(callback: CallbackQuery, **kw):
         _hh_chat_state["suggested_answer"] = ""
         _hh_chat_state["options"] = []
     else:
+        log.warning("hh_chat_ai_text_send_failed", chat_id=chat_id)
         await callback.message.edit_text(
             "❌ <b>Ошибка отправки сообщения через браузер.</b> Проверьте, открыта ли страница.",
             parse_mode="HTML",
@@ -2460,6 +2537,7 @@ async def cb_hh_send_ai(callback: CallbackQuery, **kw):
 @router.callback_query(F.data == "hh_edit")
 @admin_only
 async def cb_hh_edit(callback: CallbackQuery, state: FSMContext, **kw):
+    log.info("hh_chat_user_clicked_edit", chat_id=_hh_chat_state.get("hh_chat_id"))
     await callback.answer()
     await state.set_state(HhChatSG.waiting_edited_answer)
     await callback.message.answer(
@@ -2480,10 +2558,12 @@ async def msg_hh_custom_answer(message: Message, state: FSMContext, **kw):
         await message.answer("❌ Чат не выбран.")
         return
 
+    log.info("hh_chat_user_sent_custom_text", chat_id=chat_id, text_len=len(custom_text), preview=custom_text[:60])
     import html as _html
     await message.answer("📨 <i>Отправляю ваш вариант текста в чат hh.ru...</i>", parse_mode="HTML")
     ok = await hh_chat_parser.send_text_message(chat_id, custom_text)
     if ok:
+        log.info("hh_chat_custom_text_sent_success", chat_id=chat_id)
         await message.answer(
             f"✅ <b>Ваш ответ успешно отправлен работодателю на hh.ru:</b>\n\n"
             f"<blockquote>{_html.escape(custom_text)}</blockquote>\n\n"
@@ -2495,6 +2575,7 @@ async def msg_hh_custom_answer(message: Message, state: FSMContext, **kw):
         _hh_chat_state["waiting_for_user_action"] = False
         _hh_chat_state["options"] = []
     else:
+        log.warning("hh_chat_custom_text_send_failed", chat_id=chat_id)
         await message.answer(
             "❌ Ошибка при отправке через браузер.",
             reply_markup=hh_chat_card_keyboard(
@@ -2513,6 +2594,7 @@ async def cb_hh_regen(callback: CallbackQuery, **kw):
         await callback.answer("Вопрос не найден")
         return
 
+    log.info("hh_chat_user_regen_answer", chat_id=_hh_chat_state.get("hh_chat_id"), question=question[:60])
     await callback.answer("🔄 Генерирую альтернативный вариант...")
     answer, rec_opt, _, _ = await claude_ai.generate_hh_answer(
         question=question,
@@ -2531,11 +2613,13 @@ async def cb_hh_regen(callback: CallbackQuery, **kw):
         has_pending=True,
     )
     await callback.message.edit_text(card_text, parse_mode="HTML", reply_markup=kb)
+    log.info("hh_chat_regen_card_displayed")
 
 
 @router.callback_query(F.data == "hh_skip")
 @admin_only
 async def cb_hh_skip(callback: CallbackQuery, **kw):
+    log.info("hh_chat_user_skipped", chat_id=_hh_chat_state.get("hh_chat_id"))
     _hh_chat_state["question"] = ""
     _hh_chat_state["suggested_answer"] = ""
     _hh_chat_state["waiting_for_user_action"] = False
@@ -2548,6 +2632,7 @@ async def cb_hh_skip(callback: CallbackQuery, **kw):
 @admin_only
 async def cb_hh_stop(callback: CallbackQuery, **kw):
     global _hh_chat_task
+    log.info("hh_chat_user_stopped_monitoring")
     _hh_chat_state["is_monitoring"] = False
     _hh_chat_state["waiting_for_user_action"] = False
     if _hh_chat_task and not _hh_chat_task.done():
