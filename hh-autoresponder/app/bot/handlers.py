@@ -2416,10 +2416,13 @@ async def cb_hh_chat_toggle(callback: CallbackQuery, **kw):
     )
 
 
-@router.callback_query(F.data == "hh_chat_list")
+@router.callback_query(F.data.startswith("hh_chat_list"))
 @admin_only
 async def cb_hh_chat_list(callback: CallbackQuery, **kw):
-    log.info("hh_chat_list_requested", user_id=callback.from_user.id)
+    parts = callback.data.split(":")
+    page = int(parts[1]) if len(parts) > 1 else 0
+
+    log.info("hh_chat_list_requested", user_id=callback.from_user.id, page=page)
     await callback.answer("Загружаю список чатов...")
     status_msg = await callback.message.edit_text("⏳ <i>Получаю список последних чатов с hh.ru...</i>", parse_mode="HTML")
 
@@ -2446,9 +2449,9 @@ async def cb_hh_chat_list(callback: CallbackQuery, **kw):
 
     await status_msg.edit_text(
         "🗂 <b>Выберите диалог для ответа:</b>\n\n"
-        "<i>Здесь показаны до 10 последних диалогов. 🔴 означает наличие новых сообщений.</i>",
+        f"<i>Страница {page + 1}. 🔴 означает наличие новых сообщений.</i>",
         parse_mode="HTML",
-        reply_markup=hh_chat_list_keyboard(active_chats)
+        reply_markup=hh_chat_list_keyboard(active_chats, page=page)
     )
 
 @router.callback_query(F.data.startswith("hh_sel_chat:"))
