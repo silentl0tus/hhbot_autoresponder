@@ -306,11 +306,15 @@ def hh_chat_menu_keyboard(is_running: bool = False) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back")],
     ])
 
-def hh_chat_list_keyboard(chats: list[dict]) -> InlineKeyboardMarkup:
-    """Клавиатура со списком активных чатов."""
+def hh_chat_list_keyboard(chats: list[dict], page: int = 0) -> InlineKeyboardMarkup:
+    """Клавиатура со списком активных чатов (с пагинацией)."""
     rows = []
-    # Показываем только первые 10 чатов, чтобы не перегружать интерфейс Telegram
-    for c in chats[:10]:
+    per_page = 10
+    start_idx = page * per_page
+    end_idx = start_idx + per_page
+    
+    # Показываем чаты для текущей страницы
+    for c in chats[start_idx:end_idx]:
         title = c.get("title", "")
         company = c.get("company", "")
         
@@ -336,7 +340,15 @@ def hh_chat_list_keyboard(chats: list[dict]) -> InlineKeyboardMarkup:
             
         rows.append([InlineKeyboardButton(text=f"{marker}{label}", callback_data=f"hh_sel_chat:{chat_id}")])
         
-    rows.append([InlineKeyboardButton(text="🔄 Обновить список", callback_data="hh_chat_list")])
+    # Пагинация
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="⬅️ Пред.", callback_data=f"hh_chat_list:{page-1}"))
+    nav_buttons.append(InlineKeyboardButton(text="🔄 Обновить", callback_data=f"hh_chat_list:{page}"))
+    if len(chats) > end_idx:
+        nav_buttons.append(InlineKeyboardButton(text="След. ➡️", callback_data=f"hh_chat_list:{page+1}"))
+        
+    rows.append(nav_buttons)
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="hh_chat_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
