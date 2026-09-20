@@ -150,6 +150,7 @@ class ClaudeAI:
             import structlog
             structlog.get_logger().error("invalid_proxy_scheme", error=str(e), proxy=proxy)
             client_kwargs.pop("proxy", None)
+            client_kwargs["trust_env"] = False
             self._client = httpx.AsyncClient(**client_kwargs)
             
         self._floor = settings.llm_max_tokens_floor
@@ -174,6 +175,7 @@ class ClaudeAI:
             import structlog
             structlog.get_logger().error("invalid_proxy_scheme", error=str(e), proxy=proxy)
             client_kwargs.pop("proxy", None)
+            client_kwargs["trust_env"] = False
             self._client = httpx.AsyncClient(**client_kwargs)
         self.last_error = None
         log.info("llm_client_reinitialized", base_url=settings.llm_base_url, has_proxy=bool(proxy))
