@@ -562,8 +562,6 @@ class ClaudeAI:
             return False, err
 
 
-claude_ai = ClaudeAI()
-
     async def generate_custom_idea_answer(
         self,
         question: str,
@@ -588,3 +586,6 @@ claude_ai = ClaudeAI()
         
         ans, inp, outp = await self._call(sys_prompt, user_prompt, max_tokens=300)
         return clean_screener_answer(ans) if ans else user_idea
+
+
+claude_ai = ClaudeAI()
