@@ -23,7 +23,7 @@ python -m pip install --upgrade pip >nul
 python -m pip install -e .
 
 echo Установка браузеров Playwright...
-playwright install
+python -m playwright install
 
 echo.
 echo ===========================================
