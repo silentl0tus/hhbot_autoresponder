@@ -157,7 +157,8 @@ GEMINI_MODELS = [
 ]
 
 OPENROUTER_MODELS = [
-    ("deepseek/deepseek-v4-flash-0731:free", "⚡️ DeepSeek v4 Flash (100% Free)"),
+    ("deepseek/deepseek-chat", "⚡️ DeepSeek V3 (Быстрая и стабильная)"),
+    ("deepseek/deepseek-r1", "🧠 DeepSeek R1 (Reasoning)"),
 ]
 
 KNOWN_MODELS = GEMINI_MODELS

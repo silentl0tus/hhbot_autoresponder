@@ -558,7 +558,10 @@ async def _send_balance(target):
 
     is_openrouter = "openrouter" in settings.llm_base_url
     if is_openrouter:
-        models_info = "• <code>deepseek/deepseek-v4-flash-0731:free</code> — ⚡️ 100% Free (DeepSeek)"
+        models_info = (
+            "• <code>deepseek/deepseek-chat</code> — ⚡️ DeepSeek V3 (Быстрая и точная)\n"
+            "• <code>deepseek/deepseek-r1</code> — 🧠 DeepSeek R1 (Рассуждения)"
+        )
     else:
         models_info = (
             "• <code>gemini-3.6-flash</code> — ⚡️ Основная Flash (Google)\n"
@@ -636,7 +639,7 @@ async def cb_ai_preset(callback: CallbackQuery, **kw):
         await callback.answer(msg_text, show_alert=True)
     elif preset == "openrouter":
         settings.llm_base_url = "https://openrouter.ai/api/v1"
-        settings.llm_model = "deepseek/deepseek-v4-flash-0731:free"
+        settings.llm_model = "deepseek/deepseek-chat"
         save_env_variable("LLM_BASE_URL", settings.llm_base_url)
         save_env_variable("LLM_MODEL", settings.llm_model)
 
@@ -733,8 +736,8 @@ async def cb_ai_edit(callback: CallbackQuery, state: FSMContext, **kw):
             "✏️ <b>Ввод названия модели</b>\n\n"
             f"Текущая модель: <code>{settings.llm_model}</code>\n\n"
             "Примеры:\n"
-            "• <code>deepseek/deepseek-v4-flash-0731:free</code>\n"
-            "• <code>google/gemini-2.0-flash-001</code>\n"
+            "• <code>deepseek/deepseek-chat</code>\n"
+            "• <code>deepseek/deepseek-r1</code>\n"
             "• <code>gemini-3.6-flash</code>\n\n"
             "Пришлите точное название модели в чат или /cancel для отмены.",
             parse_mode="HTML",

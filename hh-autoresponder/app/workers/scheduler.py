@@ -43,8 +43,8 @@ class WorkerScheduler:
         self.bump_resume = state.get("bump_resume", True)
         if "selected_llm_model" in state:
             saved_model = state["selected_llm_model"]
-            if "openrouter" in settings.llm_base_url and "gemini" in saved_model:
-                settings.llm_model = "deepseek/deepseek-v4-flash-0731:free"
+            if "openrouter" in settings.llm_base_url and ("gemini" in saved_model or "deepseek-v4" in saved_model):
+                settings.llm_model = "deepseek/deepseek-chat"
             else:
                 settings.llm_model = saved_model
         self.min_ai_score = 30

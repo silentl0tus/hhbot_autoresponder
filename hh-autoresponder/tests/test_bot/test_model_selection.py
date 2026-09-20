@@ -51,6 +51,6 @@ async def test_ai_toggle_and_presets():
         mock_callback.data = "ai_preset:openrouter"
         await cb_ai_preset(mock_callback)
         assert "openrouter.ai" in settings.llm_base_url
-        assert settings.llm_model == "deepseek/deepseek-v4-flash-0731:free"
+        assert settings.llm_model == "deepseek/deepseek-chat"
         assert settings.llm_api_key == "sk-or-v1-DummyOpenRouterKey"
 
