@@ -77,10 +77,12 @@ class SettingsSG(StatesGroup):
 
 class MaxScreenerSG(StatesGroup):
     waiting_edited_answer = State()
+    waiting_custom_idea = State()
 
 
 class HhChatSG(StatesGroup):
     waiting_edited_answer = State()
+    waiting_custom_idea = State()
 
 
 _screener_state = {
@@ -2108,6 +2110,36 @@ async def msg_screener_custom_answer(message: Message, state: FSMContext, **kw):
     else:
         await message.answer("❌ Ошибка при отправке через браузер. Проверьте, открыта ли страница.", reply_markup=screener_card_keyboard(has_pending=True))
 
+@router.callback_query(F.data == "screener_custom_idea")
+@admin_only
+async def cb_screener_custom_idea(callback: CallbackQuery, state: FSMContext, **kw):
+    await callback.answer()
+    await state.set_state(MaxScreenerSG.waiting_custom_idea)
+    await callback.message.answer(
+        "💡 <b>Ваша идея ответа:</b>\n\n"
+        "Напишите коротко, что вы хотите передать рекрутеру (например: <i>«согласен на пятницу 15:00»</i> или <i>«нет, не работал с Docker»</i>).\n"
+        "Нейросеть сформулирует из этого готовый деловой ответ от вашего лица.",
+        parse_mode="HTML"
+    )
+
+@router.message(MaxScreenerSG.waiting_custom_idea)
+@admin_only
+async def msg_screener_custom_idea(message: Message, state: FSMContext, **kw):
+    user_idea = message.text.strip()
+    await state.clear()
+    status_msg = await message.answer("⏳ <i>Генерирую очеловеченный ответ на основе вашей идеи...</i>", parse_mode="HTML")
+    
+    question = _screener_state.get("question", "")
+    final_answer = await claude_ai.generate_custom_idea_answer(question=question, user_idea=user_idea)
+    
+    _screener_state["suggested_answer"] = final_answer
+    card_text = _build_screener_card_text(_screener_state)
+    
+    await status_msg.edit_text(
+        card_text,
+        parse_mode="HTML",
+        reply_markup=screener_card_keyboard(has_pending=True)
+    )
 
 @router.callback_query(F.data == "screener_skip")
 @admin_only
@@ -2746,6 +2778,43 @@ async def msg_hh_custom_answer(message: Message, state: FSMContext, **kw):
             ),
         )
 
+
+@router.callback_query(F.data == "hh_custom_idea")
+@admin_only
+async def cb_hh_custom_idea(callback: CallbackQuery, state: FSMContext, **kw):
+    await callback.answer()
+    await state.set_state(HhChatSG.waiting_custom_idea)
+    await callback.message.answer(
+        "💡 <b>Ваша идея ответа:</b>\n\n"
+        "Напишите коротко, что вы хотите передать рекрутеру (например: <i>«согласен на пятницу 15:00»</i>).\n"
+        "Нейросеть сформулирует из этого готовый деловой ответ от вашего лица.",
+        parse_mode="HTML"
+    )
+
+@router.message(HhChatSG.waiting_custom_idea)
+@admin_only
+async def msg_hh_custom_idea(message: Message, state: FSMContext, **kw):
+    user_idea = message.text.strip()
+    await state.clear()
+    status_msg = await message.answer("⏳ <i>Генерирую очеловеченный ответ на основе вашей идеи...</i>", parse_mode="HTML")
+    
+    question = _hh_chat_state.get("question", "")
+    final_answer = await claude_ai.generate_custom_idea_answer(question=question, user_idea=user_idea)
+    
+    _hh_chat_state["suggested_answer"] = final_answer
+    card_text = _build_hh_card_text(_hh_chat_state)
+    
+    kb = hh_chat_card_keyboard(
+        options=_hh_chat_state.get("options"),
+        recommended_option=_hh_chat_state.get("recommended_option"),
+        has_pending=True,
+    )
+    
+    await status_msg.edit_text(
+        card_text,
+        parse_mode="HTML",
+        reply_markup=kb
+    )
 
 @router.callback_query(F.data == "hh_regen")
 @admin_only

@@ -233,10 +233,13 @@ def screener_card_keyboard(has_pending: bool = True) -> InlineKeyboardMarkup:
     if has_pending:
         rows.append([
             InlineKeyboardButton(text="📨 Отправить в чат", callback_data="screener_send"),
-            InlineKeyboardButton(text="✏️ Отредактировать", callback_data="screener_edit"),
+            InlineKeyboardButton(text="✏️ Свой текст", callback_data="screener_edit"),
         ])
         rows.append([
-            InlineKeyboardButton(text="🔄 Другой вариант", callback_data="screener_regen"),
+            InlineKeyboardButton(text="💡 Своя мысль (через AI)", callback_data="screener_custom_idea"),
+        ])
+        rows.append([
+            InlineKeyboardButton(text="🔄 Другой вариант AI", callback_data="screener_regen"),
             InlineKeyboardButton(text="⏭ Пропустить", callback_data="screener_skip"),
         ])
     rows.append([
@@ -276,10 +279,13 @@ def hh_chat_card_keyboard(options: list[str] | None = None, recommended_option: 
     if has_pending:
         rows.append([
             InlineKeyboardButton(text="📨 Отправить AI-ответ", callback_data="hh_send_ai"),
-            InlineKeyboardButton(text="✏️ Редактировать", callback_data="hh_edit"),
+            InlineKeyboardButton(text="✏️ Свой текст", callback_data="hh_edit"),
         ])
         rows.append([
-            InlineKeyboardButton(text="🔄 Другой вариант", callback_data="hh_regen"),
+            InlineKeyboardButton(text="💡 Своя мысль (через AI)", callback_data="hh_custom_idea"),
+        ])
+        rows.append([
+            InlineKeyboardButton(text="🔄 Другой вариант AI", callback_data="hh_regen"),
             InlineKeyboardButton(text="⏭ Пропустить", callback_data="hh_skip"),
         ])
     

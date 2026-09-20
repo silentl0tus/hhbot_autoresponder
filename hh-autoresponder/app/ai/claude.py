@@ -563,3 +563,28 @@ class ClaudeAI:
 
 
 claude_ai = ClaudeAI()
+
+    async def generate_custom_idea_answer(
+        self,
+        question: str,
+        user_idea: str,
+    ) -> str:
+        """Генерирует финальный ответ рекрутеру на основе черновой мысли пользователя."""
+        if not settings.ai_enabled:
+            return user_idea
+            
+        from app.ai.prompts import SYSTEM_CUSTOM_IDEA_GENERATOR
+        
+        prompt = SYSTEM_CUSTOM_IDEA_GENERATOR.format(
+            question=question,
+            user_idea=user_idea,
+        )
+        
+        # Передаем как user_msg, так как system_msg тут используется как инструкция + данные. 
+        # Или можно передать как system_msg, а user_msg оставить пустым/формальным.
+        # В нашем классе _call ожидает sys_prompt и user_prompt.
+        sys_prompt = "Ты — помощник-соискатель."
+        user_prompt = prompt
+        
+        ans, inp, outp = await self._call(sys_prompt, user_prompt, max_tokens=300)
+        return clean_screener_answer(ans) if ans else user_idea
