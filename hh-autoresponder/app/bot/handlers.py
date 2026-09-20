@@ -559,8 +559,12 @@ async def _send_balance(target):
     is_openrouter = "openrouter" in settings.llm_base_url
     if is_openrouter:
         models_info = (
-            "• <code>deepseek/deepseek-chat</code> — ⚡️ DeepSeek V3 (Быстрая и точная)\n"
-            "• <code>deepseek/deepseek-r1</code> — 🧠 DeepSeek R1 (Рассуждения)"
+            "• <code>nex-agi/nex-n2.5-pro:free</code> — ⚡️ NEX N2.5 Pro (Free)\n"
+            "• <code>nex-agi/nex-n2.5-mini:free</code> — 🚀 NEX N2.5 Mini (Free)\n"
+            "• <code>liquid/lfm-2.5-2.6b:free</code> — 💧 Liquid LFM (Free)\n"
+            "• <code>qwen/qwen3.8-27b:free</code> — 🧠 Qwen 3.8 27B (Free)\n"
+            "• <code>google/gemma-4-31b-it:free</code> — 🔹 Gemma 4 (Free)\n"
+            "<i>🔄 Включён авто-fallback на следующую бесплатную модель при ошибках!</i>"
         )
     else:
         models_info = (
@@ -639,7 +643,7 @@ async def cb_ai_preset(callback: CallbackQuery, **kw):
         await callback.answer(msg_text, show_alert=True)
     elif preset == "openrouter":
         settings.llm_base_url = "https://openrouter.ai/api/v1"
-        settings.llm_model = "deepseek/deepseek-chat"
+        settings.llm_model = "nex-agi/nex-n2.5-pro:free"
         save_env_variable("LLM_BASE_URL", settings.llm_base_url)
         save_env_variable("LLM_MODEL", settings.llm_model)
 
@@ -736,8 +740,8 @@ async def cb_ai_edit(callback: CallbackQuery, state: FSMContext, **kw):
             "✏️ <b>Ввод названия модели</b>\n\n"
             f"Текущая модель: <code>{settings.llm_model}</code>\n\n"
             "Примеры:\n"
-            "• <code>deepseek/deepseek-chat</code>\n"
-            "• <code>deepseek/deepseek-r1</code>\n"
+            "• <code>nex-agi/nex-n2.5-pro:free</code>\n"
+            "• <code>qwen/qwen3.8-27b:free</code>\n"
             "• <code>gemini-3.6-flash</code>\n\n"
             "Пришлите точное название модели в чат или /cancel для отмены.",
             parse_mode="HTML",
