@@ -295,9 +295,33 @@ def hh_chat_menu_keyboard(is_running: bool = False) -> InlineKeyboardMarkup:
     toggle_text = "⏹ Остановить мониторинг" if is_running else "▶️ Запустить автомониторинг hh.ru"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=toggle_text, callback_data="hh_chat_toggle")],
+        [InlineKeyboardButton(text="🗂 Выбрать диалог вручную", callback_data="hh_chat_list")],
         [InlineKeyboardButton(text="🔍 Проверить чаты сейчас", callback_data="hh_poll")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back")],
     ])
+
+def hh_chat_list_keyboard(chats: list[dict]) -> InlineKeyboardMarkup:
+    """Клавиатура со списком активных чатов."""
+    rows = []
+    # Показываем только первые 10 чатов, чтобы не перегружать интерфейс Telegram
+    for c in chats[:10]:
+        company = c.get("company") or "Неизвестная компания"
+        chat_id = c.get("chat_id")
+        if not chat_id:
+            continue
+        
+        # Добавляем индикатор, если есть непрочитанные сообщения
+        marker = "🔴 " if c.get("has_unread") else "💬 "
+        
+        # Обрезаем название компании, чтобы влезло в кнопку
+        if len(company) > 35:
+            company = company[:32] + "..."
+            
+        rows.append([InlineKeyboardButton(text=f"{marker}{company}", callback_data=f"hh_sel_chat:{chat_id}")])
+        
+    rows.append([InlineKeyboardButton(text="🔄 Обновить список", callback_data="hh_chat_list")])
+    rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="hh_chat_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def models_keyboard(current_model: str) -> InlineKeyboardMarkup:

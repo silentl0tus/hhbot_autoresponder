@@ -34,6 +34,7 @@ from app.bot.keyboards import (
     screener_menu_keyboard,
     hh_chat_card_keyboard,
     hh_chat_menu_keyboard,
+    hh_chat_list_keyboard,
     models_keyboard,
     custom_ai_keyboard,
 )
@@ -2382,6 +2383,102 @@ async def cb_hh_chat_toggle(callback: CallbackQuery, **kw):
         reply_markup=hh_chat_menu_keyboard(True),
     )
 
+
+@router.callback_query(F.data == "hh_chat_list")
+@admin_only
+async def cb_hh_chat_list(callback: CallbackQuery, **kw):
+    log.info("hh_chat_list_requested", user_id=callback.from_user.id)
+    await callback.answer("Загружаю список чатов...")
+    status_msg = await callback.message.edit_text("⏳ <i>Получаю список последних чатов с hh.ru...</i>", parse_mode="HTML")
+
+    if not hh_chat_parser.is_session_available():
+        await status_msg.edit_text("❌ Нет сохраненной сессии hh.ru. Сначала пройдите авторизацию.")
+        return
+
+    chats = await hh_chat_parser.get_unread_or_active_chats()
+    if not chats:
+        await status_msg.edit_text(
+            "📭 У вас пока нет активных чатов или произошла ошибка при загрузке.",
+            reply_markup=hh_chat_menu_keyboard(_hh_chat_state.get("is_monitoring", False))
+        )
+        return
+
+    # Отбрасываем чаты с явными отказами
+    active_chats = [c for c in chats if not c.get("is_rejection")]
+    if not active_chats:
+        await status_msg.edit_text(
+            "📭 У вас нет активных диалогов (везде найден отказ).",
+            reply_markup=hh_chat_menu_keyboard(_hh_chat_state.get("is_monitoring", False))
+        )
+        return
+
+    await status_msg.edit_text(
+        "🗂 <b>Выберите диалог для ответа:</b>\n\n"
+        "<i>Здесь показаны до 10 последних диалогов. 🔴 означает наличие новых сообщений.</i>",
+        parse_mode="HTML",
+        reply_markup=hh_chat_list_keyboard(active_chats)
+    )
+
+@router.callback_query(F.data.startswith("hh_sel_chat:"))
+@admin_only
+async def cb_hh_select_chat(callback: CallbackQuery, **kw):
+    chat_id = callback.data.split(":")[1]
+    log.info("hh_chat_selected_manually", chat_id=chat_id)
+    
+    # Сбрасываем флаги ожидания
+    _hh_chat_state["waiting_for_user_action"] = False
+    
+    await callback.answer("Открываю диалог...")
+    status_msg = await callback.message.edit_text("⏳ <i>Читаю историю сообщений в чате...</i>", parse_mode="HTML")
+    
+    details = await hh_chat_parser.inspect_chat(chat_id)
+    if not details:
+        await status_msg.edit_text(
+            f"❌ Не удалось открыть чат {chat_id}.",
+            reply_markup=hh_chat_menu_keyboard(_hh_chat_state.get("is_monitoring", False))
+        )
+        return
+
+    question = details.get("last_incoming_text") or "Нет сообщений от работодателя"
+    _hh_chat_state["waiting_for_user_action"] = True
+    _hh_chat_state["hh_chat_id"] = chat_id
+    _hh_chat_state["company"] = details.get("company", "")
+    _hh_chat_state["vacancy"] = details.get("vacancy", "")
+    _hh_chat_state["question"] = question
+    _hh_chat_state["options"] = details.get("options", [])
+    
+    import html as _html
+    await status_msg.edit_text(
+        f"💬 <b>Выбран чат HeadHunter</b>\n\n"
+        f"🏢 <b>Компания:</b> {_html.escape(_hh_chat_state['company'] or '—')}\n"
+        f"📋 <b>Вакансия:</b> {_html.escape(_hh_chat_state['vacancy'] or '—')}\n"
+        f"❓ <i>«{_html.escape(question)}»</i>\n\n"
+        f"⏳ <i>Нейросеть готовит ответ на основе резюме...</i>",
+        parse_mode="HTML"
+    )
+    
+    answer, rec_opt, _, _ = await claude_ai.generate_hh_answer(
+        question=question,
+        options=_hh_chat_state["options"],
+        vacancy_title=_hh_chat_state["vacancy"],
+        company_name=_hh_chat_state["company"],
+        humanize=True,
+    )
+    
+    _hh_chat_state["suggested_answer"] = answer
+    _hh_chat_state["recommended_option"] = rec_opt
+    card_text = _build_hh_card_text(_hh_chat_state)
+    kb = hh_chat_card_keyboard(
+        options=_hh_chat_state["options"],
+        recommended_option=rec_opt,
+        has_pending=True,
+    )
+    
+    await status_msg.edit_text(
+        card_text,
+        parse_mode="HTML",
+        reply_markup=kb
+    )
 
 @router.callback_query(F.data == "hh_poll")
 @admin_only
