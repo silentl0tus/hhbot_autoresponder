@@ -144,7 +144,14 @@ class ClaudeAI:
         proxy = settings.llm_proxy or settings.proxy_url
         if proxy:
             client_kwargs["proxy"] = proxy
-        self._client = httpx.AsyncClient(**client_kwargs)
+        try:
+            self._client = httpx.AsyncClient(**client_kwargs)
+        except ValueError as e:
+            import structlog
+            structlog.get_logger().error("invalid_proxy_scheme", error=str(e), proxy=proxy)
+            client_kwargs.pop("proxy", None)
+            self._client = httpx.AsyncClient(**client_kwargs)
+            
         self._floor = settings.llm_max_tokens_floor
         self.last_error: str | None = None
 
@@ -161,7 +168,13 @@ class ClaudeAI:
         proxy = settings.llm_proxy or settings.proxy_url
         if proxy:
             client_kwargs["proxy"] = proxy
-        self._client = httpx.AsyncClient(**client_kwargs)
+        try:
+            self._client = httpx.AsyncClient(**client_kwargs)
+        except ValueError as e:
+            import structlog
+            structlog.get_logger().error("invalid_proxy_scheme", error=str(e), proxy=proxy)
+            client_kwargs.pop("proxy", None)
+            self._client = httpx.AsyncClient(**client_kwargs)
         self.last_error = None
         log.info("llm_client_reinitialized", base_url=settings.llm_base_url, has_proxy=bool(proxy))
 
