@@ -9,6 +9,7 @@ from app.ai.prompts import (
     SYSTEM_SENTIMENT_ANALYZER,
     SYSTEM_COVER_LETTER_GENERATOR,
     SYSTEM_SCREENER_ANSWER_GENERATOR,
+    SYSTEM_HH_SCREENER_GENERATOR,
 )
 from app.ai.humanizer import get_humanizer_prompt
 from app.ai.google_models import fetch_live_google_models
@@ -274,6 +275,83 @@ class ClaudeAI:
 
         clean_text = clean_screener_answer(text)
         return clean_text or text.strip(), inp_tok, out_tok
+
+    async def generate_hh_answer(
+        self,
+        question: str,
+        options: list[str] | None = None,
+        vacancy_title: str = "",
+        company_name: str = "",
+        history: str = "",
+        humanize: bool = True,
+    ) -> tuple[str, str | None, int, int]:
+        """
+        Генерирует ответ на вопрос работодателя/робота в чате HeadHunter.
+        Если переданы options (варианты выбора), AI сопоставляет резюме с вариантами
+        и возвращает (текстовый_ответ, рекомендуемый_вариант, inp_tok, out_tok).
+        """
+        if not _ai_ready():
+            first_opt = options[0] if options else None
+            return "Здравствуйте! Подтверждаю интерес к вакансии, готов обсудить стек и детали.", first_opt, 0, 0
+
+        system = SYSTEM_HH_SCREENER_GENERATOR.format(
+            resume=settings.resume_text,
+            salary_min=settings.desired_salary_min,
+            salary_max=settings.desired_salary_max,
+        )
+
+        user_msg = f"Вопрос от работодателя/рекрутера:\n{question}"
+        if options:
+            opts_str = "\n".join(f"- {opt}" for opt in options)
+            user_msg += f"\n\nПредложенные варианты выбора:\n{opts_str}"
+        if vacancy_title or company_name:
+            user_msg += f"\n\nКонтекст: Вакансия '{vacancy_title}' в компании '{company_name}'"
+        if history:
+            user_msg += f"\n\nПредыдущие сообщения:\n{history}"
+
+        text, inp_tok, out_tok = await self._call(system, user_msg, max_tokens=600)
+        if not text:
+            err_reason = self.last_error or "LLM API вернул пустой ответ"
+            log.warning("ai_hh_answer_generation_failed", error=err_reason)
+            first_opt = options[0] if options else None
+            return "", first_opt, 0, 0
+
+        # Парсим RECOMMENDED_OPTION, если были варианты
+        recommended_opt = None
+        clean_lines = []
+        for line in text.split("\n"):
+            line_s = line.strip()
+            if line_s.startswith("RECOMMENDED_OPTION:"):
+                raw_opt = line_s.replace("RECOMMENDED_OPTION:", "").strip().strip('"').strip("'")
+                if options:
+                    for opt in options:
+                        if opt.lower() in raw_opt.lower() or raw_opt.lower() in opt.lower():
+                            recommended_opt = opt
+                            break
+                    if not recommended_opt:
+                        recommended_opt = raw_opt
+            else:
+                clean_lines.append(line)
+
+        text_body = "\n".join(clean_lines).strip()
+
+        if humanize and text_body:
+            humanize_system = (
+                "Ты — соискатель, редактирующий собственное короткое сообщение рекрутеру.\n"
+                "Твоя цель: убрать признаки ИИ-генерации (канцеляризмы 'данный/является/осуществляет', "
+                "клише, стерильность) и сделать текст живым, разговорно-деловым и естественным, сохранив все технические факты.\n"
+                "КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО писать преамбулы ('Вот вариант', 'Как мог бы написать живой человек') "
+                "и предлагать несколько вариантов ответа. Выведи СТРОГО ЕДИНСТВЕННЫЙ готовый текст сообщения соискателя."
+            )
+            humanize_msg = f"Отредактируй это сообщение для чата:\n{text_body}"
+            humanized_text, h_inp, h_out = await self._call(humanize_system, humanize_msg, max_tokens=600)
+            if humanized_text:
+                text_body = humanized_text
+            inp_tok += h_inp
+            out_tok += h_out
+
+        clean_text = clean_screener_answer(text_body)
+        return clean_text or text_body, recommended_opt, inp_tok, out_tok
 
     async def analyze_sentiment(self, message: str) -> dict:
         default = {"sentiment": "neutral", "intent": "info", "urgency": "low", "summary": message[:100]}

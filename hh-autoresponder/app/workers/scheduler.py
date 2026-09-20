@@ -319,9 +319,9 @@ class WorkerScheduler:
                     )
                     continue
 
-                # 3. Шумовые статусы без позитивного сигнала — тоже мимо
+                # 3. Шумовые статусы без позитивного сигнала — тоже мимо (если нет непрочитанных сообщений)
                 is_noise = not status_lc or any(k in status_lc for k in NOISE_PAT)
-                if is_noise and not is_signal:
+                if is_noise and not is_signal and not msg.get("has_unread"):
                     log.info(
                         "msg_skip_noise",
                         platform=msg.get("platform"),
