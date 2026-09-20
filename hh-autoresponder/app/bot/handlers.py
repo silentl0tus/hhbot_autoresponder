@@ -117,7 +117,7 @@ _hh_chat_task: asyncio.Task | None = None
 @admin_only
 async def cmd_start(message: Message, **kw):
     await message.answer(
-        "👋 <b>Job Hunter Bot v1.2</b>\n\n"
+        "👋 <b>Job Hunter Bot v1.3</b>\n\n"
         "Автоматический поиск вакансий и отклики на hh.ru\n"
         "Используй кнопки ниже 👇",
         parse_mode="HTML",
@@ -1798,37 +1798,7 @@ async def cb_settings_back(callback: CallbackQuery, **kw):
     )
 
 
-@router.callback_query(F.data == "models_menu")
-@admin_only
-async def cb_models_menu(callback: CallbackQuery, **kw):
-    await callback.answer()
-    await callback.message.edit_text(
-        f"🤖 <b>Выбор модели ИИ</b>\n\nТекущая модель: <code>{settings.llm_model}</code>\n\nВыберите модель из списка. Изменение применится немедленно и сохранится в <code>.env</code>:",
-        parse_mode="HTML",
-        reply_markup=models_keyboard(settings.llm_model)
-    )
 
-
-@router.callback_query(F.data.startswith("set_model:"))
-@admin_only
-async def cb_set_model(callback: CallbackQuery, **kw):
-    model = callback.data.split(":", 1)[1]
-    
-    try:
-        from app.config import save_env_variable
-        save_env_variable("LLM_MODEL", model)
-        settings.llm_model = model
-        claude_ai.set_model(model)
-        await callback.answer(f"Модель изменена на {model}")
-    except Exception as e:
-        await callback.answer(f"Ошибка сохранения: {e}", show_alert=True)
-        return
-        
-    await callback.message.edit_text(
-        f"🤖 <b>Выбор модели ИИ</b>\n\nТекущая модель: <code>{settings.llm_model}</code>\n\nВыберите модель из списка. Изменение применится немедленно и сохранится в <code>.env</code>:",
-        parse_mode="HTML",
-        reply_markup=models_keyboard(settings.llm_model)
-    )
 
 @router.message(SettingsSG.waiting_for_custom_limit)
 @admin_only

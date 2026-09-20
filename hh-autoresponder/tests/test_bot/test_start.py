@@ -14,4 +14,4 @@ async def test_cmd_start_handler(mock_message, mocker):
     
     # Проверяем, что в ответе есть приветствие
     call_args = mock_message.answer.call_args[0][0]
-    assert "👋 <b>Job Hunter Bot v1.2</b>" in call_args
+    assert "👋 <b>Job Hunter Bot v1.3</b>" in call_args
