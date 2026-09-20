@@ -179,7 +179,8 @@ class MaxScreenerParser:
 
             await asyncio.sleep(1)
             self.last_sent_text = text.strip()
-            self.last_seen_message_text = text.strip()
+            # Убираем перезапись last_seen_message_text, чтобы парсер помнил предыдущий вопрос
+            # и не триггерился на него заново после того, как пропустит наш отправленный ответ.
             log.info("max_screener_answer_sent", text_preview=text[:60])
             return True
         except Exception as e:
