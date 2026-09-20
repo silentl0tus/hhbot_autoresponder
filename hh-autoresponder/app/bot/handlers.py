@@ -1810,7 +1810,7 @@ async def _screener_background_monitor(bot):
                         except Exception as e:
                             log.warning("screener_notify_temp_failed", error=str(e))
 
-                    answer, _, _ = await claude_ai.generate_screener_answer(q, humanize=False)
+                    answer, _, _ = await claude_ai.generate_screener_answer(q, humanize=True)
                     answer = clean_screener_answer(answer)
                     _screener_state["suggested_answer"] = answer
 
@@ -1921,7 +1921,7 @@ async def cb_screener_poll(callback: CallbackQuery, **kw):
             f"⏳ <i>Нейросеть готовит ответ на основе резюме...</i>",
             parse_mode="HTML",
         )
-        answer, _, _ = await claude_ai.generate_screener_answer(q, humanize=False)
+        answer, _, _ = await claude_ai.generate_screener_answer(q, humanize=True)
         answer = clean_screener_answer(answer)
         _screener_state["suggested_answer"] = answer
 
