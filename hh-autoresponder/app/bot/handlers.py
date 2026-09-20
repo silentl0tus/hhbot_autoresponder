@@ -35,6 +35,7 @@ from app.bot.keyboards import (
     hh_chat_card_keyboard,
     hh_chat_menu_keyboard,
     models_keyboard,
+    custom_ai_keyboard,
 )
 from app.parsers.max_screener import max_screener
 from app.parsers.hh_chat import hh_chat_parser
@@ -601,6 +602,20 @@ async def _send_balance(target):
         await target.answer()
     else:
         await target.answer(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=reply_kb)
+
+
+@router.callback_query(F.data == "ai_custom_menu")
+@admin_only
+async def cb_ai_custom_menu(callback: CallbackQuery, **kw):
+    await callback.answer()
+    text = (
+        "🛠 <b>Настройка пользовательского провайдера LLM</b>\n\n"
+        "Здесь вы можете вручную задать URL провайдера, токен и название модели для подключения к любой OpenAI-совместимой платформе (например, VLLM, Ollama, DeepSeek и др.).\n\n"
+        f"🌐 <b>Base URL:</b> <code>{settings.llm_base_url}</code>\n"
+        f"🔑 <b>API-ключ:</b> {_mask_key(settings.llm_api_key)}\n"
+        f"✏️ <b>Модель:</b> <code>{settings.llm_model}</code>\n"
+    )
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=custom_ai_keyboard())
 
 
 @router.callback_query(F.data == "ai_toggle")

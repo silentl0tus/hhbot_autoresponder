@@ -197,21 +197,26 @@ def ai_models_keyboard(current_model: str, ai_enabled: bool = True, is_openroute
         rows.append([InlineKeyboardButton(text=f"{mark}{label}", callback_data=f"set_model:{model_id}")])
     
     rows.append([
-        InlineKeyboardButton(text="✏️ Ввести свою модель", callback_data="ai_edit:model"),
-    ])
-    rows.append([
         InlineKeyboardButton(text="🌐 Пресет: Gemini", callback_data="ai_preset:gemini"),
         InlineKeyboardButton(text="🚀 Пресет: OpenRouter", callback_data="ai_preset:openrouter"),
     ])
     rows.append([
-        InlineKeyboardButton(text="🔑 Сменить API-ключ", callback_data="ai_edit:key"),
-        InlineKeyboardButton(text="🌐 Сменить Base URL", callback_data="ai_edit:url"),
+        InlineKeyboardButton(text="🛠 Настроить своего провайдера", callback_data="ai_custom_menu"),
     ])
     rows.append([
         InlineKeyboardButton(text="🛡 Прокси для LLM", callback_data="ai_edit:proxy"),
         InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back"),
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def custom_ai_keyboard() -> InlineKeyboardMarkup:
+    """Отдельное меню для настройки кастомного провайдера (URL, Key, Model)."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🌐 Сменить Base URL", callback_data="ai_edit:url")],
+        [InlineKeyboardButton(text="🔑 Сменить API-ключ", callback_data="ai_edit:key")],
+        [InlineKeyboardButton(text="✏️ Ввести свою модель", callback_data="ai_edit:model")],
+        [InlineKeyboardButton(text="◀️ Назад к пресетам", callback_data="show_balance")],
+    ])
 
 def stats_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
