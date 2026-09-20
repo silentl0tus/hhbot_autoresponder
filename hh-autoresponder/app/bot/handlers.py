@@ -2110,84 +2110,91 @@ async def _hh_chat_background_monitor(bot):
         try:
             if not _hh_chat_state.get("waiting_for_user_action", False):
                 chats = await hh_chat_parser.get_unread_or_active_chats()
-                unread_chats = [c for c in chats if c.get("has_unread")]
-                target_chat = unread_chats[0] if unread_chats else None
+                unread_chats = [c for c in chats if c.get("has_unread") and not c.get("is_rejection")]
 
-                if target_chat and target_chat.get("chat_id"):
-                    chat_id = target_chat["chat_id"]
+                for target_chat in unread_chats:
+                    chat_id = target_chat.get("chat_id")
+                    if not chat_id:
+                        continue
                     details = await hh_chat_parser.inspect_chat(chat_id)
-                    if details and not details.get("is_last_from_me"):
-                        question = details.get("last_incoming_text") or target_chat.get("last_message", "")
-                        notif_key = f"{chat_id}_{question}"
+                    if not details or details.get("is_rejection") or details.get("is_closed") or details.get("is_last_from_me"):
+                        continue
 
-                        if question and notif_key != _hh_chat_state.get("last_notified_key"):
-                            _hh_chat_state["waiting_for_user_action"] = True
-                            _hh_chat_state["hh_chat_id"] = chat_id
-                            _hh_chat_state["last_notified_key"] = notif_key
-                            _hh_chat_state["company"] = details.get("company") or target_chat.get("company", "")
-                            _hh_chat_state["vacancy"] = details.get("vacancy") or target_chat.get("title", "")
-                            _hh_chat_state["question"] = question
-                            _hh_chat_state["options"] = details.get("options", [])
+                    question = details.get("last_incoming_text") or target_chat.get("last_message", "")
+                    if not question:
+                        continue
 
-                            tg_chat_id = _hh_chat_state.get("chat_id") or settings.tg_admin_chat_id
-                            status_msg = None
-                            if tg_chat_id:
-                                try:
-                                    import html as _html
-                                    status_msg = await bot.send_message(
-                                        chat_id=int(tg_chat_id),
-                                        text=(
-                                            f"💬 <b>Новый вопрос в чате HeadHunter!</b>\n\n"
-                                            f"🏢 <b>Компания:</b> {_html.escape(_hh_chat_state['company'] or '—')}\n"
-                                            f"📋 <b>Вакансия:</b> {_html.escape(_hh_chat_state['vacancy'] or '—')}\n"
-                                            f"❓ <i>«{_html.escape(question)}»</i>\n\n"
-                                            f"⏳ <i>Нейросеть готовит ответ на основе резюме...</i>"
-                                        ),
-                                        parse_mode="HTML",
-                                    )
-                                except Exception as e:
-                                    log.warning("hh_chat_temp_msg_error", error=str(e))
+                    notif_key = f"{chat_id}_{question}"
+                    if notif_key == _hh_chat_state.get("last_notified_key"):
+                        continue
 
-                            answer, rec_opt, _, _ = await claude_ai.generate_hh_answer(
-                                question=question,
-                                options=_hh_chat_state["options"],
-                                vacancy_title=_hh_chat_state["vacancy"],
-                                company_name=_hh_chat_state["company"],
-                                humanize=True,
+                    _hh_chat_state["waiting_for_user_action"] = True
+                    _hh_chat_state["hh_chat_id"] = chat_id
+                    _hh_chat_state["last_notified_key"] = notif_key
+                    _hh_chat_state["company"] = details.get("company") or target_chat.get("company", "")
+                    _hh_chat_state["vacancy"] = details.get("vacancy") or target_chat.get("title", "")
+                    _hh_chat_state["question"] = question
+                    _hh_chat_state["options"] = details.get("options", [])
+                    tg_chat_id = _hh_chat_state.get("chat_id") or settings.tg_admin_chat_id
+                    status_msg = None
+                    if tg_chat_id:
+                        try:
+                            import html as _html
+                            status_msg = await bot.send_message(
+                                chat_id=int(tg_chat_id),
+                                text=(
+                                    f"💬 <b>Новый вопрос в чате HeadHunter!</b>\n\n"
+                                    f"🏢 <b>Компания:</b> {_html.escape(_hh_chat_state['company'] or '—')}\n"
+                                    f"📋 <b>Вакансия:</b> {_html.escape(_hh_chat_state['vacancy'] or '—')}\n"
+                                    f"❓ <i>«{_html.escape(question)}»</i>\n\n"
+                                    f"⏳ <i>Нейросеть готовит ответ на основе резюме...</i>"
+                                ),
+                                parse_mode="HTML",
                             )
-                            _hh_chat_state["suggested_answer"] = answer
-                            _hh_chat_state["recommended_option"] = rec_opt
+                        except Exception as e:
+                            log.warning("hh_chat_temp_msg_error", error=str(e))
 
-                            card_text = _build_hh_card_text(_hh_chat_state)
-                            kb = hh_chat_card_keyboard(
-                                options=_hh_chat_state["options"],
-                                recommended_option=rec_opt,
-                                has_pending=True,
+                    answer, rec_opt, _, _ = await claude_ai.generate_hh_answer(
+                        question=question,
+                        options=_hh_chat_state["options"],
+                        vacancy_title=_hh_chat_state["vacancy"],
+                        company_name=_hh_chat_state["company"],
+                        humanize=True,
+                    )
+                    _hh_chat_state["suggested_answer"] = answer
+                    _hh_chat_state["recommended_option"] = rec_opt
+
+                    card_text = _build_hh_card_text(_hh_chat_state)
+                    kb = hh_chat_card_keyboard(
+                        options=_hh_chat_state["options"],
+                        recommended_option=rec_opt,
+                        has_pending=True,
+                    )
+                    if tg_chat_id:
+                        if status_msg:
+                            try:
+                                await bot.edit_message_text(
+                                    chat_id=int(tg_chat_id),
+                                    message_id=status_msg.message_id,
+                                    text=card_text,
+                                    parse_mode="HTML",
+                                    reply_markup=kb,
+                                )
+                            except Exception:
+                                await bot.send_message(
+                                    chat_id=int(tg_chat_id),
+                                    text=card_text,
+                                    parse_mode="HTML",
+                                    reply_markup=kb,
+                                )
+                        else:
+                            await bot.send_message(
+                                chat_id=int(tg_chat_id),
+                                text=card_text,
+                                parse_mode="HTML",
+                                reply_markup=kb,
                             )
-                            if tg_chat_id:
-                                if status_msg:
-                                    try:
-                                        await bot.edit_message_text(
-                                            chat_id=int(tg_chat_id),
-                                            message_id=status_msg.message_id,
-                                            text=card_text,
-                                            parse_mode="HTML",
-                                            reply_markup=kb,
-                                        )
-                                    except Exception:
-                                        await bot.send_message(
-                                            chat_id=int(tg_chat_id),
-                                            text=card_text,
-                                            parse_mode="HTML",
-                                            reply_markup=kb,
-                                        )
-                                else:
-                                    await bot.send_message(
-                                        chat_id=int(tg_chat_id),
-                                        text=card_text,
-                                        parse_mode="HTML",
-                                        reply_markup=kb,
-                                    )
+                    break
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -2282,29 +2289,38 @@ async def cb_hh_poll(callback: CallbackQuery, **kw):
         return
 
     target_chat = None
-    unread_chats = [c for c in chats if c.get("has_unread")]
-    if unread_chats:
-        target_chat = unread_chats[0]
-    else:
-        # Проверяем первые 5 чатов на входящие сообщения
+    target_details = None
+
+    unread_chats = [c for c in chats if c.get("has_unread") and not c.get("is_rejection")]
+    for c in unread_chats:
+        cid = c.get("chat_id")
+        if not cid:
+            continue
+        details = await hh_chat_parser.inspect_chat(cid)
+        if details and not details.get("is_rejection") and not details.get("is_closed") and not details.get("is_last_from_me") and details.get("last_incoming_text"):
+            target_chat = c
+            target_details = details
+            break
+
+    if not target_chat:
+        # Проверяем первые 5 чатов на входящие сообщения, пропуская явные отказы
         for c in chats[:5]:
+            if c.get("is_rejection"):
+                continue
             cid = c.get("chat_id")
             if cid:
                 details = await hh_chat_parser.inspect_chat(cid)
-                if details and not details.get("is_last_from_me") and details.get("last_incoming_text"):
+                if details and not details.get("is_rejection") and not details.get("is_closed") and not details.get("is_last_from_me") and details.get("last_incoming_text"):
                     target_chat = c
+                    target_details = details
                     break
 
-    if not target_chat or not target_chat.get("chat_id"):
-        await status_msg.edit_text("✅ Все чаты на hh.ru прочитаны, ожидающих вопросов нет.")
+    if not target_chat or not target_details:
+        await status_msg.edit_text("✅ Все активные чаты проверены. Ожидающих вопросов нет (отказы и закрытые диалоги пропущены).")
         return
 
     chat_id = target_chat["chat_id"]
-    details = await hh_chat_parser.inspect_chat(chat_id)
-    if not details:
-        await status_msg.edit_text("❌ Не удалось прочитать выбранный диалог на hh.ru.")
-        return
-
+    details = target_details
     question = details.get("last_incoming_text") or target_chat.get("last_message", "")
     if not question:
         await status_msg.edit_text("✅ В этом диалоге нет вопросов от работодателя.")

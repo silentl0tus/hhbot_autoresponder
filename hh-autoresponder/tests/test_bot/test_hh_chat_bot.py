@@ -6,6 +6,7 @@ from app.bot.handlers import (
     cb_hh_chat_menu,
     cb_hh_skip,
     cb_hh_stop,
+    cb_hh_poll,
     _hh_chat_state,
     _build_hh_card_text,
 )
@@ -58,3 +59,33 @@ async def test_cb_hh_skip_and_stop():
         with patch("app.bot.handlers.hh_chat_parser.close", new=AsyncMock()):
             await cb_hh_stop(callback)
             assert _hh_chat_state["is_monitoring"] is False
+
+
+@pytest.mark.asyncio
+async def test_cb_hh_poll_skips_rejection():
+    callback = AsyncMock(spec=CallbackQuery)
+    callback.from_user = User(id=123, is_bot=False, first_name="Test")
+    status_msg = AsyncMock()
+    callback.message = AsyncMock()
+    callback.message.chat = Chat(id=123, type="private")
+    callback.message.answer = AsyncMock(return_value=status_msg)
+    callback.answer = AsyncMock()
+
+    mock_chats = [
+        {
+            "chat_id": "999",
+            "title": "Data Engineer",
+            "company": "Банк",
+            "has_unread": True,
+            "is_rejection": True,
+            "last_message": "К сожалению, мы вынуждены отказать",
+        }
+    ]
+
+    with patch("app.bot.handlers.settings.tg_admin_chat_id", "123"):
+        with patch("app.bot.handlers.hh_chat_parser.is_session_available", return_value=True):
+            with patch("app.bot.handlers.hh_chat_parser.get_unread_or_active_chats", new=AsyncMock(return_value=mock_chats)):
+                await cb_hh_poll(callback)
+                # Ensure it did not treat rejection as a question
+                assert _hh_chat_state.get("waiting_for_user_action") is False
+                status_msg.edit_text.assert_called_with("✅ Все активные чаты проверены. Ожидающих вопросов нет (отказы и закрытые диалоги пропущены).")

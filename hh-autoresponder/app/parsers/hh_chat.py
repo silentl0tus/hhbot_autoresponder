@@ -21,6 +21,36 @@ log = structlog.get_logger()
 HH_CHAT_URL = "https://hh.ru/chat"
 DEFAULT_STORAGE_PATH = Path("data/browser_sessions/hh_state.json")
 
+HH_REJECT_PATTERNS = (
+    "отказ",
+    "не подош",
+    "отклонил",
+    "отклонен",
+    "решил остановить",
+    "к сожалению, в настоящий момент",
+    "к сожалению, мы не готовы",
+    "к сожалению, мы вынуждены",
+    "не готовы пригласить",
+    "вынуждены отказать",
+    "выбрали другого",
+    "в пользу другого",
+    "вернуться к вашей кандидатуре",
+    "сохраним ваше резюме",
+    "желаем вам успехов",
+    "желаем успехов в поиске",
+    "позиция закрыта",
+    "вакансия закрыта",
+    "архив",
+)
+
+
+def is_rejection_text(text: str) -> bool:
+    """Проверяет, содержит ли текст явные признаки отказа или закрытия вакансии."""
+    if not text:
+        return False
+    t_lc = text.lower()
+    return any(p in t_lc for p in HH_REJECT_PATTERNS)
+
 
 class HHChatParser:
     def __init__(self, storage_path: Path | str = DEFAULT_STORAGE_PATH):
@@ -150,18 +180,27 @@ class HHChatParser:
                         const unreadCount = parseInt(badgeText, 10) || 0;
                         const hasUnread = unreadCount > 0 || !!badgeEl;
 
+                        const lastMsg = subtitleEl ? (subtitleEl.innerText || '').trim() : '';
+                        const company = metaEl ? (metaEl.innerText || '').trim() : '';
+                        const rejectRegex = /отказ|не подош|отклон|останов|не готовы пригласить|к сожалению|вынуждены отказать|другого кандидата|вакансия закрыта|позиция закрыта|архив/i;
+                        const isRejection = rejectRegex.test(lastMsg) || rejectRegex.test(company);
+
                         res.push({
                             chat_id: chatId,
                             title: titleEl ? (titleEl.innerText || '').trim() : '',
-                            company: metaEl ? (metaEl.innerText || '').trim() : '',
-                            last_message: subtitleEl ? (subtitleEl.innerText || '').trim() : '',
+                            company: company,
+                            last_message: lastMsg,
                             unread_count: unreadCount,
                             has_unread: hasUnread,
+                            is_rejection: isRejection,
                         });
                     }
                     return res;
                 }"""
                 chats = await self._page.evaluate(_CHATS_JS)
+                for c in chats:
+                    if is_rejection_text(c.get("last_message", "")) or is_rejection_text(c.get("company", "")):
+                        c["is_rejection"] = True
                 return chats
             except Exception as e:
                 log.warning("hh_chat_get_list_error", error=str(e))
@@ -190,7 +229,9 @@ class HHChatParser:
                         last_incoming_author: '',
                         is_last_from_me: false,
                         options: [],
-                        history: []
+                        history: [],
+                        is_closed: false,
+                        is_rejection: false
                     };
 
                     // Header title / company
@@ -249,6 +290,22 @@ class HHChatParser:
                     }
                     res.options = quickBtns;
 
+                    // Проверка закрытости чата и возможности отправки сообщений
+                    const textarea = document.querySelector('textarea[data-qa="text-input"]');
+                    const isInputDisabled = !textarea || textarea.disabled || textarea.readOnly || textarea.getAttribute('disabled') !== null;
+                    const pageText = (document.body.innerText || '');
+                    const isClosedNotice = pageText.includes('Чат закрыт') || 
+                                           pageText.includes('Диалог закрыт') || 
+                                           pageText.includes('нельзя отправить сообщение') ||
+                                           pageText.includes('отправка сообщений отключена') ||
+                                           pageText.includes('Переписка завершена') ||
+                                           !!document.querySelector('[data-qa*="chat-closed"], [class*="chat-closed"], [class*="closed-banner"]');
+
+                    res.is_closed = isClosedNotice || (isInputDisabled && quickBtns.length === 0);
+
+                    const rejectRegex = /отказ|не подош|отклон|останов|не готовы пригласить|к сожалению|вынуждены отказать|другого кандидата|вернуться к вашей кандидатуре|желаем успехов|вакансия закрыта|позиция закрыта/i;
+                    res.is_rejection = rejectRegex.test(res.last_incoming_text || '') || (isClosedNotice && quickBtns.length === 0);
+
                     return res;
                 }"""
                 data = await self._page.evaluate(_INSPECT_JS)
@@ -256,6 +313,8 @@ class HHChatParser:
                     return None
 
                 data["chat_id"] = chat_id
+                if is_rejection_text(data.get("last_incoming_text", "")):
+                    data["is_rejection"] = True
                 return data
 
             except Exception as e:
