@@ -91,6 +91,12 @@ class WorkerScheduler:
         self.manual_paused_platforms: set[str] = set(state.get("manual_paused_platforms", []))
         # Cooldown уведомлений о слетевшей сессии: { "habr": ISO8601, "hh": ISO8601 }
         self._last_login_alert: dict[str, str] = dict(state.get("last_login_alert", {}))
+        self.sheets_last_sync_at: str | None = state.get("sheets_last_sync_at")
+        self.sheets_last_updated: int = int(state.get("sheets_last_updated", 0) or 0)
+        self.sheets_last_unmatched: int = int(state.get("sheets_last_unmatched", 0) or 0)
+        self.sheets_last_error: str | None = state.get("sheets_last_error")
+        self.sheets_invitations: int = int(state.get("sheets_invitations", 0) or 0)
+        self.sheets_invitation_previews: list[str] = list(state.get("sheets_invitation_previews") or [])
 
     def _load_state(self) -> dict:
         try:
@@ -124,6 +130,12 @@ class WorkerScheduler:
             state["work_end_generated_date"] = self.limit_generated_date
             if self._last_apply_summary_at:
                 state["last_apply_summary_at"] = self._last_apply_summary_at.isoformat()
+            state["sheets_last_sync_at"] = self.sheets_last_sync_at
+            state["sheets_last_updated"] = self.sheets_last_updated
+            state["sheets_last_unmatched"] = self.sheets_last_unmatched
+            state["sheets_last_error"] = self.sheets_last_error
+            state["sheets_invitations"] = self.sheets_invitations
+            state["sheets_invitation_previews"] = self.sheets_invitation_previews
             STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
             STATE_FILE.write_text(json.dumps(state))
         except Exception as e:
@@ -618,6 +630,7 @@ class WorkerScheduler:
                         f"За окно откликов не было.\n"
                         f"🗓 За сегодня всего: <b>{today_sent_e or 0}</b>"
                     )
+                    text = await self._append_inbox_to_summary(text)
                     if self.notify:
                         try:
                             await self.notify(text)
@@ -693,6 +706,7 @@ class WorkerScheduler:
                 lines.append(f"🗓 За сегодня всего: <b>{today_sent}</b>")
 
             text = "\n".join(lines)
+            text = await self._append_inbox_to_summary(text)
 
             # Шлём напрямую, минуя _is_quiet_hours — это пользовательски запрошенный
             # пакетный отчёт по расписанию, тихие часы тут не уместны.
@@ -765,6 +779,16 @@ class WorkerScheduler:
         self.scheduler.shutdown()
         log.info("scheduler_stopped")
 
+    async def _append_inbox_to_summary(self, text: str) -> str:
+        try:
+            from app.services.inbox import collect_inbox, format_inbox, inbox_has_actions
+            data = await collect_inbox(self)
+            if inbox_has_actions(data):
+                return text + "\n\n" + format_inbox(data, heading=True)
+        except Exception as e:
+            log.warning("apply_summary_inbox_error", error=str(e)[:160])
+        return text
+
     async def _job_sync_sheets(self, force=False) -> int:
         if self.is_paused and not force:
             return 0
@@ -772,8 +796,10 @@ class WorkerScheduler:
         updated_count = 0
         try:
             from app.parsers.hh_oauth import hh_oauth
-            from app.services.google_sheets import sync_statuses_to_sheets
-            
+            from app.services.google_sheets import SyncResult, sync_statuses_to_sheets
+            from app.services.hh_status_sync import sync_hh_statuses_to_db
+            from app.utils import notifier
+
             statuses = []
             if await hh_oauth.get_token():
                 try:
@@ -787,12 +813,50 @@ class WorkerScheduler:
                 from app.parsers.hh_playwright import HHPlaywright
                 hh = HHPlaywright()
                 statuses = await hh.check_negotiations_status()
-            
+
+            result = SyncResult()
             if statuses:
-                updated_count = await sync_statuses_to_sheets(statuses)
+                await sync_hh_statuses_to_db(statuses)
+                result = await sync_statuses_to_sheets(statuses)
+                updated_count = result.updated
                 log.info("sync_sheets_job_completed", updated_count=updated_count)
+
+            self.sheets_last_sync_at = datetime.now(MSK).strftime("%Y-%m-%d %H:%M")
+            self.sheets_last_updated = result.updated
+            self.sheets_last_unmatched = result.unmatched
+            self.sheets_last_error = result.error
+            self.sheets_invitations = result.invitations or sum(
+                1 for s in statuses if (s.get("tab") or "").lower() in ("invitations", "invitation")
+            )
+            self.sheets_invitation_previews = result.invitation_previews or [
+                f"{(s.get('company') or '').strip()}: {(s.get('title') or '')[:50]}".strip(": ")
+                for s in statuses
+                if (s.get("tab") or "").lower() in ("invitations", "invitation")
+            ][:5]
+            self._save_state()
+
+            if result.error:
+                await notifier.send(
+                    f"❌ <b>Google Sheets</b>: ошибка синхронизации статусов\n"
+                    f"<code>{result.error[:180]}</code>"
+                )
+            else:
+                await notifier.vlog(
+                    f"📑 <b>Таблица</b>: обновлено {result.updated}, "
+                    f"не найдено в таблице {result.unmatched}"
+                )
             return updated_count
-                
+
         except Exception as e:
             log.error("sync_sheets_job_error", error=str(e))
+            self.sheets_last_error = str(e)[:240]
+            self.sheets_last_sync_at = datetime.now(MSK).strftime("%Y-%m-%d %H:%M")
+            self._save_state()
+            try:
+                from app.utils import notifier
+                await notifier.send(
+                    f"❌ <b>Google Sheets</b>: ошибка синхронизации\n<code>{str(e)[:180]}</code>"
+                )
+            except Exception:
+                pass
             return 0

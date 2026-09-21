@@ -281,15 +281,18 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
                     elif vacancy.salary_to:
                         salary_str = f"до {vacancy.salary_to} {vacancy.salary_currency}"
                         
-                    asyncio.create_task(append_application(
+                    await append_application(
                         date_str=date_str,
                         title=vacancy.title or "",
                         company=company_name,
                         url=vacancy.url or "",
                         status="Ждем ответа" if success else "Ошибка",
                         cover_letter=letter,
-                        ai_score=vacancy.ai_score
-                    ))
+                        ai_score=vacancy.ai_score,
+                        platform=vacancy.platform or "",
+                        salary=salary_str,
+                        vacancy_id=str(vacancy.external_id or ""),
+                    )
 
             log.info(
                 "apply_result",

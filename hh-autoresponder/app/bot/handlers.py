@@ -233,6 +233,15 @@ async def btn_stats(message: Message, **kw):
     )
 
 
+@router.message(F.text == "📌 Что дальше")
+@admin_only
+async def btn_inbox(message: Message, **kw):
+    from app.services.inbox import collect_inbox, format_inbox
+    data = await collect_inbox(_scheduler)
+    text = format_inbox(data, heading=True)
+    await message.answer(text, parse_mode="HTML")
+
+
 @router.message(F.text == "🔍 Вакансии")
 @router.message(Command("vacancies"))
 @admin_only

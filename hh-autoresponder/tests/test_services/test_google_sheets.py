@@ -9,6 +9,9 @@ from app.services.google_sheets import append_application, sync_statuses_to_shee
 @patch("app.services.google_sheets.Path")
 @patch("app.services.google_sheets.settings")
 async def test_append_application(mock_settings, mock_path, mock_credentials, mock_gspread):
+    from app.services.google_sheets import reset_client
+    reset_client()
+    
     # Setup mocks
     mock_settings.google_sheet_url = "https://docs.google.com/spreadsheets/d/test"
     mock_settings.google_sheets_credentials_path = "test_creds.json"
@@ -25,6 +28,8 @@ async def test_append_application(mock_settings, mock_path, mock_credentials, mo
     mock_gc.open_by_url.return_value = mock_sh
     mock_sh.get_worksheet.return_value = mock_worksheet
     
+    mock_worksheet.get_all_values.return_value = []
+    
     # Run test
     await append_application(
         date_str="2026-09-19",
@@ -36,7 +41,6 @@ async def test_append_application(mock_settings, mock_path, mock_credentials, mo
         ai_score=45.0
     )
     
-    # Verify
     mock_worksheet.append_row.assert_called_once()
     called_args = mock_worksheet.append_row.call_args[0][0]
     
@@ -49,6 +53,7 @@ async def test_append_application(mock_settings, mock_path, mock_credentials, mo
     assert called_args[6] == "My cover letter"
     assert called_args[7] == "Ждем ответа"
     assert called_args[8] == "AI Score: 45"
+    assert called_args[9] == "123" # vacancy_id
 
 @pytest.mark.asyncio
 @patch("app.services.google_sheets.gspread")
@@ -56,6 +61,9 @@ async def test_append_application(mock_settings, mock_path, mock_credentials, mo
 @patch("app.services.google_sheets.Path")
 @patch("app.services.google_sheets.settings")
 async def test_sync_statuses_to_sheets(mock_settings, mock_path, mock_credentials, mock_gspread):
+    from app.services.google_sheets import reset_client
+    reset_client()
+    
     # Setup mocks
     mock_settings.google_sheet_url = "https://docs.google.com/spreadsheets/d/test"
     mock_settings.google_sheets_credentials_path = "test_creds.json"
@@ -74,9 +82,9 @@ async def test_sync_statuses_to_sheets(mock_settings, mock_path, mock_credential
     
     # Mock worksheet data
     mock_worksheet.get_all_values.return_value = [
-        ["Дата", "Ссылка", "Позиция", "Компания", "Контакт", "CV", "CL", "Статус", "Коммент"],
-        ["2026-09-18", "https://hh.ru/vacancy/111", "Dev", "Co", "", "CV", "CL", "Ждем ответа", ""],
-        ["2026-09-19", "https://hh.ru/vacancy/222", "Dev", "Co", "", "CV", "CL", "Ждем ответа", ""]
+        ["Дата", "Ссылка", "Позиция", "Компания", "Контакт", "CV", "CL", "Статус", "Коммент", "Vacancy ID"],
+        ["2026-09-18", "https://hh.ru/vacancy/111", "Dev", "Co", "", "CV", "CL", "Ждем ответа", "", "111"],
+        ["2026-09-19", "https://hh.ru/vacancy/222", "Dev", "Co", "", "CV", "CL", "Ждем ответа", "", "222"]
     ]
     
     parsed_statuses = [

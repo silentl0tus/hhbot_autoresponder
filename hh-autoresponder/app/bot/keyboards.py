@@ -10,8 +10,9 @@ def main_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🔍 Вакансии"), KeyboardButton(text="📊 Статистика")],
-            [KeyboardButton(text="📩 Сообщения"), KeyboardButton(text="⚙️ Настройки")],
-            [KeyboardButton(text="📝 Создать сопроводительное"), KeyboardButton(text="📋 Логи")],
+            [KeyboardButton(text="📌 Что дальше"), KeyboardButton(text="📩 Сообщения")],
+            [KeyboardButton(text="⚙️ Настройки"), KeyboardButton(text="📋 Логи")],
+            [KeyboardButton(text="📝 Создать сопроводительное")],
         ],
         resize_keyboard=True,
     )
@@ -223,7 +224,8 @@ def custom_ai_keyboard() -> InlineKeyboardMarkup:
 
 def stats_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔄 Принудительное обновление статусов", callback_data="force_sync_sheets")]
+        [InlineKeyboardButton(text="📌 Что делать дальше", callback_data="show_inbox")],
+        [InlineKeyboardButton(text="🔄 Принудительное обновление статусов", callback_data="force_sync_sheets")],
     ])
 
 
