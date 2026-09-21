@@ -135,7 +135,9 @@ class Settings(BaseSettings):
 
     # ── Уведомления (тихие часы, МСК) ─────────────────────────
     notify_hour_start: int = 9
-    notify_hour_end: int = 22
+    notify_hour_end: int = 22           # нижняя граница конца рабочего дня
+    notify_hour_end_max: int = 23       # верхняя граница конца рабочего дня (рандомизируется каждый день)
+    notify_minute_end_max: int = 40     # максимальная минута при notify_hour_end_max (до 23:40)
 
     # ── Производные значения ──────────────────────────────────
     @property

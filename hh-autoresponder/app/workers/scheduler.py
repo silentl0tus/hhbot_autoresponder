@@ -50,6 +50,28 @@ class WorkerScheduler:
         self.min_ai_score = 30
         self.notify = notify_callback  # async fn(text) -> sends to TG
 
+        # Рандомизация времени окончания рабочего дня (09:00 — [21:00..23:40]).
+        # Генерируется один раз в сутки и сохраняется в state.
+        today_str = datetime.now(MSK).strftime("%Y-%m-%d")
+        saved_end_date = state.get("work_end_generated_date", "")
+        if saved_end_date == today_str:
+            # Восстанавливаем сохранённое значение (hour, minute)
+            self._work_end_hour: int = state.get("work_end_hour", settings.notify_hour_end)
+            self._work_end_minute: int = state.get("work_end_minute", 0)
+        else:
+            # Генерируем новое: час от notify_hour_end (21) до notify_hour_end_max (23)
+            self._work_end_hour = random.randint(settings.notify_hour_end, settings.notify_hour_end_max)
+            if self._work_end_hour == settings.notify_hour_end_max:
+                # При максимальном часе — минута от 0 до notify_minute_end_max (40)
+                self._work_end_minute = random.randint(0, settings.notify_minute_end_max)
+            else:
+                self._work_end_minute = random.randint(0, 59)
+        log.info(
+            "work_window_initialized",
+            start=f"{settings.notify_hour_start:02d}:00",
+            end=f"{self._work_end_hour:02d}:{self._work_end_minute:02d}",
+        )
+
         # Время последней отправленной сводки по откликам (для оконного запроса в БД)
         self._last_apply_summary_at: datetime | None = None
         last_iso = state.get("last_apply_summary_at")
@@ -96,6 +118,10 @@ class WorkerScheduler:
             state["paused_platforms"] = sorted(self.paused_platforms)
             state["manual_paused_platforms"] = sorted(self.manual_paused_platforms)
             state["last_login_alert"] = self._last_login_alert
+            # Сохраняем рандомное время окончания рабочего дня
+            state["work_end_hour"] = self._work_end_hour
+            state["work_end_minute"] = self._work_end_minute
+            state["work_end_generated_date"] = self.limit_generated_date
             if self._last_apply_summary_at:
                 state["last_apply_summary_at"] = self._last_apply_summary_at.isoformat()
             STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -104,9 +130,25 @@ class WorkerScheduler:
             log.warning("scheduler_state_save_error", error=str(e))
 
     def _is_quiet_hours(self) -> bool:
-        """True если сейчас тихие часы (не отправляем уведомления)."""
-        hour = datetime.now(MSK).hour
-        return not (settings.notify_hour_start <= hour < settings.notify_hour_end)
+        """True если сейчас тихие часы (не отправляем отклики / уведомления).
+
+        Рабочее окно: 09:00 — [21:00..23:40] МСК (конец рандомизируется каждый день).
+        """
+        now = datetime.now(MSK)
+        hour = now.hour
+        minute = now.minute
+
+        # Раньше начала рабочего дня
+        if hour < settings.notify_hour_start:
+            return True
+
+        # Позже конца рабочего дня (рандомное время)
+        if hour > self._work_end_hour:
+            return True
+        if hour == self._work_end_hour and minute >= self._work_end_minute:
+            return True
+
+        return False
 
     async def _notify_if_allowed(self, text: str):
         """Отправить уведомление только в разрешённое время."""
@@ -213,6 +255,9 @@ class WorkerScheduler:
     async def _job_search(self):
         if self.is_paused:
             return
+        if self._is_quiet_hours():
+            log.debug("job_search_quiet_hours_skip")
+            return
         try:
             await run_vacancy_search()
         except Exception as e:
@@ -220,6 +265,9 @@ class WorkerScheduler:
 
     async def _job_analyze(self):
         if self.is_paused:
+            return
+        if self._is_quiet_hours():
+            log.debug("job_analyze_quiet_hours_skip")
             return
         try:
             await run_vacancy_analysis()

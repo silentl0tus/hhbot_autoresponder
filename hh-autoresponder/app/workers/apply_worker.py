@@ -183,6 +183,9 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
         try:
             if ai_cover_letters and settings.ai_enabled and settings.llm_api_key:
                 from app.ai.claude import claude_ai
+                # Сбрасываем ошибку предыдущего цикла, чтобы она не просочилась
+                # в уведомление при обработке текущей вакансии.
+                claude_ai.last_error = None
                 cname = vacancy.company.name if vacancy.company else ""
                 letter, _, _ = await claude_ai.generate_cover_letter(
                     vacancy_title=vacancy.title,

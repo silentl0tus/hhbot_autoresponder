@@ -21,6 +21,13 @@ LEVEL_SENIOR = [
     r"\bprincipal\b", r"\bархитектор\b", r"\barchitect\b",
     r"руководител", r"директор", r"начальник", r"глава",
 ]
+# Дополнительные слова, которые указывают на Senior-уровень в заголовке
+# (не затрагивают описание, только title-фильтр)
+LEVEL_SENIOR_TITLE_EXTRA = [
+    r"\bexpert\b", r"\bэксперт\b",
+    r"\bteam\s*lead\b", r"\btech\s*lead\b",
+    r"ведущий", r"главный",
+]
 
 
 def _match_any_re(text: str, patterns: list[str]) -> bool:
@@ -60,13 +67,17 @@ def analyze_vacancy(
 
     # 2. Железная дисквалификация Senior/Lead в заголовке.
     # Если в заголовке есть Senior/Lead/Head/Архитектор и нет явного указания Middle/Junior (вилки) -> отказ
-    has_senior_title = _match_any_re(t, LEVEL_SENIOR)
+    has_senior_title = _match_any_re(t, LEVEL_SENIOR) or _match_any_re(t, LEVEL_SENIOR_TITLE_EXTRA)
     has_middle_or_jun_title = _match_any_re(t, LEVEL_MIDDLE) or bool(
         re.search(r"\bjunior\b|\bjun\b|\bджуниор\b|\bмладш", t, re.IGNORECASE)
     )
     if has_senior_title and not has_middle_or_jun_title:
+        matched = next(
+            (p for p in LEVEL_SENIOR + LEVEL_SENIOR_TITLE_EXTRA if re.search(p, t, re.IGNORECASE)),
+            "неизвестно",
+        )
         return {
-            "score": 0, "reason": "Отказ (Senior уровень)",
+            "score": 0, "reason": f"Отказ (Senior уровень, паттерн: '{matched}')",
             "is_relevant": False, "seniority": "senior",
             "red_flags": ["senior_level"], "stack_match": 0,
         }
@@ -136,9 +147,15 @@ def analyze_vacancy(
         seniority = "junior_middle"
         score += 15
     elif is_senior and not is_middle:
+        # Проходим сюда только если Senior есть в описании, но не в заголовке.
+        # (заголовок уже проверен выше)
         seniority = "senior"
+        matched_desc = next(
+            (p for p in LEVEL_SENIOR if re.search(p, full, re.IGNORECASE)),
+            "неизвестно",
+        )
         return {
-            "score": 0, "reason": "Отказ (Senior уровень)",
+            "score": 0, "reason": f"Отказ (Senior уровень в описании, паттерн: '{matched_desc}')",
             "is_relevant": False, "seniority": "senior",
             "red_flags": ["senior_level"], "stack_match": 0,
         }

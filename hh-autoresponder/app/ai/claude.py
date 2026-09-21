@@ -124,6 +124,32 @@ OPENROUTER_FREE_FALLBACK_MODELS = [
     "deepseek/deepseek-v4-flash-0731:free",
 ]
 
+# Паттерны «отказа ассистента» — модель не следует промпту и пишет сервисное сообщение.
+# Такой текст нельзя отправлять в отклик вместо сопроводительного письма.
+ASSISTANT_REFUSAL_PATTERNS = [
+    "не могу обработать",
+    "не могу выполнить",
+    "не могу создать",
+    "не могу помочь",
+    "не в состоянии",
+    "как языковая модель",
+    "как искусственный интеллект",
+    "как иИ",
+    "as an ai",
+    "as a language model",
+    "i cannot",
+    "i'm unable",
+    "i am unable",
+    "i'm not able",
+    "i cannot process",
+    "cannot fulfill",
+    "я всего лишь языковая модель",
+    "я являюсь языковой моделью",
+    "прошу прощения",
+    "не имею возможности",
+    "к сожалению, я не могу",
+]
+
 
 
 
@@ -339,6 +365,21 @@ class ClaudeAI:
                     has_cyrillic=has_cyrillic,
                     has_reasoning_leak=has_reasoning_leak,
                     preview=text[:150],
+                )
+                text = ""
+
+        # Фильтр паттернов «отказа ассистента»:
+        # модель не следует промпту и пишет сервисное сообщение вместо письма.
+        if text:
+            text_lower = text.lower()
+            refusal_hit = next(
+                (p for p in ASSISTANT_REFUSAL_PATTERNS if p in text_lower), None
+            )
+            if refusal_hit:
+                log.warning(
+                    "ai_cover_letter_refusal_pattern_rejected",
+                    pattern=refusal_hit,
+                    preview=text[:200],
                 )
                 text = ""
 
