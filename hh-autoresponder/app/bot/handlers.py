@@ -398,22 +398,35 @@ async def handle_manual_cl_feedback(message: Message, state: FSMContext, **kw):
             feedback=message.text
         )
         
-        await processing_msg.delete()
+        try:
+            await processing_msg.delete()
+        except Exception:
+            pass
+            
         if cover_text and original_msg_id:
-            await message.bot.edit_message_text(
-                chat_id=message.chat.id,
-                message_id=original_msg_id,
-                text=f"✅ <b>Готово:</b>\n\n{cover_text}",
-                parse_mode="HTML",
-                reply_markup=manual_cover_keyboard()
-            )
+            try:
+                await message.bot.edit_message_text(
+                    chat_id=message.chat.id,
+                    message_id=original_msg_id,
+                    text=f"✅ <b>Готово:</b>\n\n{cover_text}",
+                    parse_mode="HTML",
+                    reply_markup=manual_cover_keyboard()
+                )
+            except Exception as edit_err:
+                if "message is not modified" in str(edit_err).lower():
+                    await message.reply("Текст письма не изменился после исправления.")
+                else:
+                    await message.reply(f"❌ Ошибка обновления: {str(edit_err)}")
         elif cover_text:
             msg = await message.answer(f"✅ <b>Готово:</b>\n\n{cover_text}", parse_mode="HTML", reply_markup=manual_cover_keyboard())
             await state.update_data(original_msg_id=msg.message_id)
         else:
             await message.reply("❌ Ошибка генерации.")
     except Exception as e:
-        await processing_msg.delete()
+        try:
+            await processing_msg.delete()
+        except:
+            pass
         await message.reply(f"❌ Ошибка: {str(e)}")
 
 
