@@ -337,7 +337,7 @@ async def cb_regen_manual_cl(callback: CallbackQuery, state: FSMContext, **kw):
 
     await callback.message.edit_text("🤖 Перегенерирую письмо...", parse_mode="HTML")
 
-    force_model = "gemma-4-31b-it" if callback.data == "regen_manual_gemma" else None
+    force_model = "gemma-4-26b-a4b-it" if callback.data == "regen_manual_gemma" else None
 
     try:
         cover_text, _, _ = await claude_ai.generate_cover_letter(
@@ -350,7 +350,9 @@ async def cb_regen_manual_cl(callback: CallbackQuery, state: FSMContext, **kw):
         if cover_text:
             await callback.message.edit_text(f"✅ <b>Готово:</b>\n\n{cover_text}", parse_mode="HTML", reply_markup=manual_cover_keyboard())
         else:
-            await callback.message.edit_text("❌ Ошибка генерации.", parse_mode="HTML")
+            err = claude_ai.last_error or "Неизвестная ошибка"
+            await callback.answer(f"❌ Ошибка генерации: {err}", show_alert=True)
+            await callback.message.edit_text("🤖 Выберите действие:", reply_markup=manual_cover_keyboard())
     except Exception as e:
         await callback.message.edit_text(f"❌ Ошибка: {str(e)}", parse_mode="HTML")
 
@@ -1148,14 +1150,19 @@ async def cb_regen_cl(callback: CallbackQuery, **kw):
 
     await callback.message.edit_text("🤖 Перегенерирую письмо...")
 
-    force_model = "gemma-4-31b-it" if callback.data.startswith("regen_gemma:") else None
+    force_model = "gemma-4-26b-a4b-it" if callback.data.startswith("regen_gemma:") else None
     humanize = _scheduler.humanize_letters if _scheduler else False
     letter, _, _ = await claude_ai.generate_cover_letter(title, desc, "", humanize=humanize, force_model=force_model)
 
-    await callback.message.edit_text(
-        letter,
-        reply_markup=confirm_apply_keyboard(vacancy_id),
-    )
+    if letter:
+        await callback.message.edit_text(
+            letter,
+            reply_markup=confirm_apply_keyboard(vacancy_id),
+        )
+    else:
+        err = claude_ai.last_error or "Неизвестная ошибка"
+        await callback.answer(f"❌ Ошибка генерации: {err}", show_alert=True)
+        await callback.message.edit_text("🤖 Выберите действие:", reply_markup=confirm_apply_keyboard(vacancy_id))
 
 
 @router.callback_query(F.data.startswith("fix_cl:"))
