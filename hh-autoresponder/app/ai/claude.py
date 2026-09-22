@@ -324,6 +324,10 @@ class ClaudeAI:
                     total_candidates=len(fallback_chain),
                     error=last_error_text,
                 )
+                if e.response.status_code == 429:
+                    # Уперлись в лимит запросов в минуту (RPM). Делаем паузу перед тем, как стучаться в следующую модель.
+                    import asyncio
+                    await asyncio.sleep(3)
             except Exception as e:
                 last_error_text = f"{type(e).__name__} ({candidate_model}): {str(e)[:150]}"
                 log.warning(
