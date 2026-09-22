@@ -323,7 +323,7 @@ async def process_manual_cover(message: Message, state: FSMContext, **kw):
         await message.answer(f"❌ <b>Ошибка при генерации письма:</b>\n<code>{str(e)}</code>", parse_mode="HTML")
 
 
-@router.callback_query(F.data == "regen_manual_cl")
+@router.callback_query(F.data.in_({"regen_manual_cl", "regen_manual_gemma"}))
 @admin_only
 async def cb_regen_manual_cl(callback: CallbackQuery, state: FSMContext, **kw):
     data = await state.get_data()
@@ -337,12 +337,15 @@ async def cb_regen_manual_cl(callback: CallbackQuery, state: FSMContext, **kw):
 
     await callback.message.edit_text("🤖 Перегенерирую письмо...", parse_mode="HTML")
 
+    force_model = "google/gemma-2-9b-it:free" if callback.data == "regen_manual_gemma" else None
+
     try:
         cover_text, _, _ = await claude_ai.generate_cover_letter(
             vacancy_title=title,
             vacancy_description=description,
             company_name=company,
-            humanize=settings.humanize_letters
+            humanize=settings.humanize_letters,
+            force_model=force_model
         )
         if cover_text:
             await callback.message.edit_text(f"✅ <b>Готово:</b>\n\n{cover_text}", parse_mode="HTML", reply_markup=manual_cover_keyboard())
@@ -1130,7 +1133,7 @@ async def cb_apply(callback: CallbackQuery, **kw):
     )
 
 
-@router.callback_query(F.data.startswith("regen_cl:"))
+@router.callback_query(F.data.startswith("regen_cl:") | F.data.startswith("regen_gemma:"))
 @admin_only
 async def cb_regen_cl(callback: CallbackQuery, **kw):
     vacancy_id = int(callback.data.split(":")[1])
@@ -1145,8 +1148,9 @@ async def cb_regen_cl(callback: CallbackQuery, **kw):
 
     await callback.message.edit_text("🤖 Перегенерирую письмо...")
 
+    force_model = "google/gemma-2-9b-it:free" if callback.data.startswith("regen_gemma:") else None
     humanize = _scheduler.humanize_letters if _scheduler else False
-    letter, _, _ = await claude_ai.generate_cover_letter(title, desc, "", humanize=humanize)
+    letter, _, _ = await claude_ai.generate_cover_letter(title, desc, "", humanize=humanize, force_model=force_model)
 
     await callback.message.edit_text(
         letter,

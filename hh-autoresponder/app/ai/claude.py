@@ -369,7 +369,7 @@ class ClaudeAI:
         self.last_error = last_error_text or "Все модели в цепочке fallback завершились ошибкой"
         return "", 0, 0
 
-    async def generate_cover_letter(self, vacancy_title: str, vacancy_description: str, company_name: str = "", humanize: bool = False, feedback: str = "", previous_cover_letter: str = "") -> tuple[str, int, int]:
+    async def generate_cover_letter(self, vacancy_title: str, vacancy_description: str, company_name: str = "", humanize: bool = False, feedback: str = "", previous_cover_letter: str = "", force_model: str = None) -> tuple[str, int, int]:
         if not _ai_ready():
             reason = "AI выключен в настройках" if not settings.ai_enabled else "Отсутствует LLM_API_KEY"
             log.info("ai_disabled_fallback_used", reason=reason)
@@ -390,7 +390,7 @@ class ClaudeAI:
                 user_msg += f"\n\nВот текущий вариант письма:\n---\n{previous_cover_letter}\n---\n"
             user_msg += f"\nСгенерируй письмо заново, ОБЯЗАТЕЛЬНО учтя следующее исправление/ошибку от пользователя:\n{feedback}"
         # Лимит 2500 токенов достаточен и для текста письма, и для запаса на reasoning-модели
-        text, inp_tok, out_tok = await self._call(system, user_msg, max_tokens=2500)
+        text, inp_tok, out_tok = await self._call(system, user_msg, max_tokens=2500, model=force_model)
         
         # Очищаем от вводных фраз отклика ("Откликаюсь на вакансию..."), которые уже есть в интерфейсе HH
         if text:

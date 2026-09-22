@@ -64,6 +64,9 @@ def confirm_apply_keyboard(vacancy_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🔄 Перегенерировать", callback_data=f"regen_cl:{vacancy_id}"),
+            InlineKeyboardButton(text="🔄 Gemma", callback_data=f"regen_gemma:{vacancy_id}"),
+        ],
+        [
             InlineKeyboardButton(text="✏️ Указать ошибку", callback_data=f"fix_cl:{vacancy_id}"),
         ],
         [
@@ -77,6 +80,9 @@ def manual_cover_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="regen_manual_cl"),
+            InlineKeyboardButton(text="🔄 Gemma", callback_data="regen_manual_gemma"),
+        ],
+        [
             InlineKeyboardButton(text="✏️ Указать ошибку", callback_data="fix_manual_cl"),
         ],
     ])
