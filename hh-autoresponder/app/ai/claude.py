@@ -112,16 +112,14 @@ def clean_cover_letter(text: str) -> str:
 
 
 OPENROUTER_FREE_FALLBACK_MODELS = [
+    "qwen/qwen3.8-27b:free",
+    "liquid/lfm-2.5-2.6b:free",
+    "nvidia/nemotron-3.5-lightning:free",
     "nex-agi/nex-n2.5-pro:free",
     "nex-agi/nex-n2.5-mini:free",
-    "liquid/lfm-2.5-2.6b:free",
-    "inclusionai/ling-3.0-flash-vl:free",
-    "qwen/qwen3.8-27b:free",
-    "google/gemma-4-31b-it:free",
-    "google/gemma-4-26b-a4b-it:free",
-    "nvidia/nemotron-3.5-lightning:free",
-    "z-ai/glm-5.2:free",
-    "deepseek/deepseek-v4-flash-0731:free",
+    "dots-studio/dots-3-note-preview:free",
+    "thinkingmachines/inkling-small:free",
+    "poolside/laguna-s-2.1:free"
 ]
 
 # Паттерны «отказа ассистента» — модель не следует промпту и пишет сервисное сообщение.
@@ -229,7 +227,7 @@ class ClaudeAI:
         """Возвращает легковесную модель для простых задач (хуманизация, анализ тона),
         чтобы экономить лимиты (и деньги/токены) основной топовой модели."""
         if "openrouter" in settings.llm_base_url:
-            return "google/gemma-4-31b-it:free"
+            return "qwen/qwen3.8-27b:free"
         elif "generativelanguage" in settings.llm_base_url:
             return "gemini-3.5-flash-lite"
         return settings.llm_model
