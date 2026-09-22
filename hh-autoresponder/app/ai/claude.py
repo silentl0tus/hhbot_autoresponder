@@ -225,6 +225,15 @@ class ClaudeAI:
         """Динамически получает актуальные модели Google из API / документации."""
         return await fetch_live_google_models()
 
+    def _get_fast_model(self) -> str:
+        """Возвращает легковесную модель для простых задач (хуманизация, анализ тона),
+        чтобы экономить лимиты (и деньги/токены) основной топовой модели."""
+        if "openrouter" in settings.llm_base_url:
+            return "google/gemma-4-31b-it:free"
+        elif "generativelanguage" in settings.llm_base_url:
+            return "gemini-3.5-flash-lite"
+        return settings.llm_model
+
     async def _call(self, system: str, user_message: str, max_tokens: int = 1024, model: str | None = None) -> tuple[str, int, int]:
         self.last_error = None
         if not _ai_ready():
@@ -413,7 +422,7 @@ class ClaudeAI:
         if humanize:
             humanize_system = get_humanizer_prompt()
             humanize_msg = f"Очеловечь следующий текст сопроводительного письма, используя свои правила:\n\n{text}"
-            humanized_text, h_inp, h_out = await self._call(humanize_system, humanize_msg, max_tokens=2500)
+            humanized_text, h_inp, h_out = await self._call(humanize_system, humanize_msg, max_tokens=2500, model=self._get_fast_model())
             if humanized_text and re.search(r"[а-яёА-ЯЁ]", humanized_text):
                 text = clean_cover_letter(humanized_text)
             else:
@@ -486,7 +495,7 @@ class ClaudeAI:
                 "и предлагать несколько вариантов ответа. Выведи СТРОГО ЕДИНСТВЕННЫЙ готовый текст сообщения соискателя."
             )
             humanize_msg = f"Отредактируй это сообщение для чата:\n{text}"
-            humanized_text, h_inp, h_out = await self._call(humanize_system, humanize_msg, max_tokens=600)
+            humanized_text, h_inp, h_out = await self._call(humanize_system, humanize_msg, max_tokens=600, model=self._get_fast_model())
             if humanized_text:
                 text = humanized_text
             inp_tok += h_inp
@@ -563,7 +572,7 @@ class ClaudeAI:
                 "и предлагать несколько вариантов ответа. Выведи СТРОГО ЕДИНСТВЕННЫЙ готовый текст сообщения соискателя."
             )
             humanize_msg = f"Отредактируй это сообщение для чата:\n{text_body}"
-            humanized_text, h_inp, h_out = await self._call(humanize_system, humanize_msg, max_tokens=600)
+            humanized_text, h_inp, h_out = await self._call(humanize_system, humanize_msg, max_tokens=600, model=self._get_fast_model())
             if humanized_text:
                 text_body = humanized_text
             inp_tok += h_inp
@@ -576,7 +585,7 @@ class ClaudeAI:
         default = {"sentiment": "neutral", "intent": "info", "urgency": "low", "summary": message[:100]}
         if not _ai_ready():
             return default
-        text, _, _ = await self._call(SYSTEM_SENTIMENT_ANALYZER, message, max_tokens=256)
+        text, _, _ = await self._call(SYSTEM_SENTIMENT_ANALYZER, message, max_tokens=256, model=self._get_fast_model())
         try:
             clean = text.strip()
             if clean.startswith("```"):
