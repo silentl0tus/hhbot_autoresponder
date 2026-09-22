@@ -168,7 +168,7 @@ class ClaudeAI:
         client_kwargs = {
             "base_url": settings.llm_base_url.rstrip("/"),
             "headers": {"Authorization": f"Bearer {settings.llm_api_key}"},
-            "timeout": httpx.Timeout(240.0, connect=30.0),
+            "timeout": httpx.Timeout(90.0, connect=10.0),
         }
         proxy = settings.llm_proxy or settings.proxy_url
         if proxy:
@@ -193,7 +193,7 @@ class ClaudeAI:
         client_kwargs = {
             "base_url": settings.llm_base_url.rstrip("/"),
             "headers": {"Authorization": f"Bearer {settings.llm_api_key}"},
-            "timeout": httpx.Timeout(240.0, connect=30.0),
+            "timeout": httpx.Timeout(90.0, connect=10.0),
         }
         proxy = settings.llm_proxy or settings.proxy_url
         if proxy:
@@ -292,6 +292,10 @@ class ClaudeAI:
             for fb in live_models:
                 if fb not in fallback_chain:
                     fallback_chain.append(fb)
+
+        # Ограничиваем количество попыток fallback, чтобы не зависать на 5+ минут,
+        # если весь API провайдера лежит.
+        fallback_chain = fallback_chain[:4]
 
         last_error_text = ""
 
