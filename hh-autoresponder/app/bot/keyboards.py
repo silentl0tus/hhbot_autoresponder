@@ -63,10 +63,24 @@ def message_keyboard(message_id: int) -> InlineKeyboardMarkup:
 def confirm_apply_keyboard(vacancy_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
+            InlineKeyboardButton(text="🔄 Перегенерировать", callback_data=f"regen_cl:{vacancy_id}"),
+            InlineKeyboardButton(text="✏️ Указать ошибку", callback_data=f"fix_cl:{vacancy_id}"),
+        ],
+        [
             InlineKeyboardButton(text="📨 Да, отправить", callback_data=f"confirm_apply:{vacancy_id}"),
             InlineKeyboardButton(text="❌ Отмена", callback_data=f"cancel_apply:{vacancy_id}"),
         ],
     ])
+
+
+def manual_cover_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="regen_manual_cl"),
+            InlineKeyboardButton(text="✏️ Указать ошибку", callback_data="fix_manual_cl"),
+        ],
+    ])
+
 
 
 def settings_keyboard(is_paused: bool = False, auto_apply: bool = False, limit: int = 0, paused_platforms: set = None) -> InlineKeyboardMarkup:

@@ -24,6 +24,7 @@ from app.bot.keyboards import (
     vacancy_list_keyboard,
     message_keyboard,
     confirm_apply_keyboard,
+    manual_cover_keyboard,
     settings_keyboard,
     clear_neg_keyboard,
     behavior_keyboard,
@@ -71,6 +72,11 @@ def _company_name(vacancy) -> str:
 
 class ManualCoverLetter(StatesGroup):
     waiting_for_url_or_text = State()
+    done = State()
+    waiting_for_feedback = State()
+
+class CoverLetterFix(StatesGroup):
+    waiting_for_feedback = State()
 
 class SettingsSG(StatesGroup):
     waiting_for_custom_limit = State()
@@ -288,6 +294,10 @@ async def process_manual_cover(message: Message, state: FSMContext, **kw):
 
     await message.answer("⏳ Генерирую сопроводительное письмо...")
     
+    # Сохраняем данные для перегенерации
+    await state.set_state(ManualCoverLetter.done)
+    await state.update_data(title=title, description=description, company=company)
+    
     try:
         cover_text, _, _ = await claude_ai.generate_cover_letter(
             vacancy_title=title,
@@ -303,13 +313,109 @@ async def process_manual_cover(message: Message, state: FSMContext, **kw):
                 parse_mode="HTML"
             )
         elif cover_text:
-            await message.answer(f"✅ <b>Готово:</b>\n\n{cover_text}", parse_mode="HTML")
+            msg = await message.answer(f"✅ <b>Готово:</b>\n\n{cover_text}", parse_mode="HTML", reply_markup=manual_cover_keyboard())
+            await state.update_data(original_msg_id=msg.message_id)
         else:
             err = claude_ai.last_error or "LLM вернула пустой ответ"
             await message.answer(f"❌ <b>Ошибка при генерации письма:</b>\n<code>{err}</code>", parse_mode="HTML")
     except Exception as e:
         log.error("manual_cover_error", error=str(e))
         await message.answer(f"❌ <b>Ошибка при генерации письма:</b>\n<code>{str(e)}</code>", parse_mode="HTML")
+
+
+@router.callback_query(F.data == "regen_manual_cl")
+@admin_only
+async def cb_regen_manual_cl(callback: CallbackQuery, state: FSMContext, **kw):
+    data = await state.get_data()
+    title = data.get("title", "")
+    description = data.get("description", "")
+    company = data.get("company", "")
+    
+    if not title and not description:
+        await callback.answer("Нет данных для перегенерации.")
+        return
+
+    await callback.message.edit_text("🤖 Перегенерирую письмо...", parse_mode="HTML")
+
+    try:
+        cover_text, _, _ = await claude_ai.generate_cover_letter(
+            vacancy_title=title,
+            vacancy_description=description,
+            company_name=company,
+            humanize=settings.humanize_letters
+        )
+        if cover_text:
+            await callback.message.edit_text(f"✅ <b>Готово:</b>\n\n{cover_text}", parse_mode="HTML", reply_markup=manual_cover_keyboard())
+        else:
+            await callback.message.edit_text("❌ Ошибка генерации.", parse_mode="HTML")
+    except Exception as e:
+        await callback.message.edit_text(f"❌ Ошибка: {str(e)}", parse_mode="HTML")
+
+
+@router.callback_query(F.data == "fix_manual_cl")
+@admin_only
+async def cb_fix_manual_cl(callback: CallbackQuery, state: FSMContext, **kw):
+    await state.set_state(ManualCoverLetter.waiting_for_feedback)
+    await callback.message.reply(
+        "Напишите текстом, что нужно исправить (например: «напиши короче»):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="Отмена", callback_data="cancel_manual_fix")
+        ]])
+    )
+
+
+@router.callback_query(F.data == "cancel_manual_fix")
+@admin_only
+async def cb_cancel_manual_fix(callback: CallbackQuery, state: FSMContext, **kw):
+    await state.set_state(ManualCoverLetter.done)
+    await callback.message.delete()
+    await callback.answer("Отменено")
+
+
+@router.message(ManualCoverLetter.waiting_for_feedback)
+@admin_only
+async def handle_manual_cl_feedback(message: Message, state: FSMContext, **kw):
+    data = await state.get_data()
+    title = data.get("title", "")
+    description = data.get("description", "")
+    company = data.get("company", "")
+    original_msg_id = data.get("original_msg_id")
+    
+    await state.set_state(ManualCoverLetter.done)
+    
+    if not title and not description:
+        await message.reply("Нет данных для работы.")
+        return
+
+    processing_msg = await message.reply("🤖 Генерирую исправленный вариант...")
+
+    try:
+        cover_text, _, _ = await claude_ai.generate_cover_letter(
+            vacancy_title=title,
+            vacancy_description=description,
+            company_name=company,
+            humanize=settings.humanize_letters,
+            feedback=message.text
+        )
+        
+        await processing_msg.delete()
+        if cover_text and original_msg_id:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=original_msg_id,
+                text=f"✅ <b>Готово:</b>\n\n{cover_text}",
+                parse_mode="HTML",
+                reply_markup=manual_cover_keyboard()
+            )
+        elif cover_text:
+            msg = await message.answer(f"✅ <b>Готово:</b>\n\n{cover_text}", parse_mode="HTML", reply_markup=manual_cover_keyboard())
+            await state.update_data(original_msg_id=msg.message_id)
+        else:
+            await message.reply("❌ Ошибка генерации.")
+    except Exception as e:
+        await processing_msg.delete()
+        await message.reply(f"❌ Ошибка: {str(e)}")
+
 
 
 @router.message(F.text == "📩 Сообщения")
@@ -1002,6 +1108,86 @@ async def cb_apply(callback: CallbackQuery, **kw):
         letter,
         reply_markup=confirm_apply_keyboard(vacancy_id),
     )
+
+
+@router.callback_query(F.data.startswith("regen_cl:"))
+@admin_only
+async def cb_regen_cl(callback: CallbackQuery, **kw):
+    vacancy_id = int(callback.data.split(":")[1])
+
+    async with async_session() as session:
+        vacancy = await session.get(Vacancy, vacancy_id)
+        if not vacancy:
+            await callback.answer("Вакансия не найдена")
+            return
+        title = vacancy.title
+        desc = vacancy.description or ""
+
+    await callback.message.edit_text("🤖 Перегенерирую письмо...")
+
+    humanize = _scheduler.humanize_letters if _scheduler else False
+    letter, _, _ = await claude_ai.generate_cover_letter(title, desc, "", humanize=humanize)
+
+    await callback.message.edit_text(
+        letter,
+        reply_markup=confirm_apply_keyboard(vacancy_id),
+    )
+
+
+@router.callback_query(F.data.startswith("fix_cl:"))
+@admin_only
+async def cb_fix_cl(callback: CallbackQuery, state: FSMContext, **kw):
+    vacancy_id = int(callback.data.split(":")[1])
+    await state.set_state(CoverLetterFix.waiting_for_feedback)
+    await state.update_data(vacancy_id=vacancy_id, original_msg_id=callback.message.message_id)
+    await callback.message.reply(
+        "Напишите текстом, что нужно исправить (например: «напиши короче» или «убери упоминание AWS»):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="Отмена", callback_data=f"cancel_fix_cl:{vacancy_id}")
+        ]])
+    )
+
+
+@router.callback_query(F.data.startswith("cancel_fix_cl:"))
+@admin_only
+async def cb_cancel_fix_cl(callback: CallbackQuery, state: FSMContext, **kw):
+    await state.clear()
+    await callback.message.delete()
+    await callback.answer("Отменено")
+
+
+@router.message(CoverLetterFix.waiting_for_feedback)
+@admin_only
+async def handle_cl_feedback(message: Message, state: FSMContext, **kw):
+    data = await state.get_data()
+    vacancy_id = data.get("vacancy_id")
+    original_msg_id = data.get("original_msg_id")
+    await state.clear()
+
+    if not vacancy_id:
+        return
+
+    async with async_session() as session:
+        vacancy = await session.get(Vacancy, vacancy_id)
+        if not vacancy:
+            await message.reply("Вакансия не найдена.")
+            return
+        title = vacancy.title
+        desc = vacancy.description or ""
+
+    processing_msg = await message.reply("🤖 Генерирую исправленный вариант...")
+
+    humanize = _scheduler.humanize_letters if _scheduler else False
+    letter, _, _ = await claude_ai.generate_cover_letter(title, desc, "", humanize=humanize, feedback=message.text)
+
+    await processing_msg.delete()
+    await message.bot.edit_message_text(
+        chat_id=message.chat.id,
+        message_id=original_msg_id,
+        text=letter,
+        reply_markup=confirm_apply_keyboard(vacancy_id),
+    )
+
 
 
 @router.callback_query(F.data.startswith("confirm_apply:"))
