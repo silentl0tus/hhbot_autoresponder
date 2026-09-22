@@ -816,6 +816,23 @@ class WorkerScheduler:
 
             result = SyncResult()
             if statuses:
+                # Обогащаем статусы сообщениями из чатов (поскольку API/отклики не отдают текст автоскринеров)
+                try:
+                    from app.parsers.hh_chat import hh_chat_parser
+                    chats = await hh_chat_parser.get_unread_or_active_chats()
+                    if chats:
+                        chat_map = {}
+                        for c in chats:
+                            key = (c.get("company") or "").lower().strip()
+                            if key:
+                                chat_map[key] = c.get("last_message", "")
+                        for s in statuses:
+                            company = (s.get("company") or "").lower().strip()
+                            if company in chat_map and not s.get("last_message"):
+                                s["last_message"] = chat_map[company]
+                except Exception as e:
+                    log.warning("sync_sheets_chat_enrichment_failed", error=str(e))
+
                 await sync_hh_statuses_to_db(statuses)
                 result = await sync_statuses_to_sheets(statuses)
                 updated_count = result.updated
