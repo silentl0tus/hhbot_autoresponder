@@ -33,6 +33,7 @@ LOG_HEADER = [
     "Vacancy ID",
     "Платформа",
     "Зарплата",
+    "Последнее сообщение",
 ]
 
 STATUS_MAPPING = {
@@ -147,11 +148,21 @@ def _header_index(header: list, *needles: str, default: int) -> int:
 
 def _ensure_log_header(worksheet, header: list[str]) -> list[str]:
     if not header:
+        try:
+            if worksheet.col_count < len(LOG_HEADER):
+                worksheet.add_cols(len(LOG_HEADER) - worksheet.col_count)
+        except Exception:
+            pass
         worksheet.update("A1", [LOG_HEADER], value_input_option="USER_ENTERED")
         return list(LOG_HEADER)
-    extra = [col for col in ("Vacancy ID", "Платформа", "Зарплата") if col not in header]
+    extra = [col for col in ("Vacancy ID", "Платформа", "Зарплата", "Последнее сообщение") if col not in header]
     if extra:
         new_header = list(header) + extra
+        try:
+            if worksheet.col_count < len(new_header):
+                worksheet.add_cols(len(new_header) - worksheet.col_count)
+        except Exception:
+            pass
         worksheet.update("A1", [new_header], value_input_option="USER_ENTERED")
         return new_header
     return header
@@ -368,7 +379,7 @@ def _upsert_row_sync(
         worksheet.batch_update(updates, value_input_option="USER_ENTERED")
         log.info("google_sheets_row_updated", row=found_row, vacancy_id=vac_id)
     else:
-        width = max(len(header), 12)
+        width = max(len(header), 13)
         row_data = [""] * width
         row_data[0] = date_str
         row_data[url_idx] = url
@@ -387,6 +398,10 @@ def _upsert_row_sync(
         row_data[vac_idx] = vac_id
         row_data[plat_idx] = platform
         row_data[salary_idx] = salary
+        
+        while row_data and row_data[-1] == "":
+            row_data.pop()
+            
         worksheet.append_row(row_data, value_input_option="USER_ENTERED")
         log.info("google_sheets_row_appended", url=settings.google_sheet_url, vacancy_id=vac_id)
         all_values.append(row_data)
@@ -414,17 +429,18 @@ def _sync_statuses_sync(parsed_statuses: list[dict]) -> SyncResult:
     worksheet = sh.get_worksheet(0)
     log.info("google_sheets_sync_input", raw_count=len(parsed_statuses))
 
-    update_map: dict[str, str] = {}
+    update_map: dict[str, tuple[str, str]] = {}
     for s in parsed_statuses:
         tab = (s.get("tab") or "").lower()
         status = (s.get("status") or "").lower()
         new_status = STATUS_MAPPING.get(tab) or STATUS_MAPPING.get(status)
-        if not new_status:
+        last_msg = (s.get("last_message") or "").strip()
+        if not new_status and not last_msg:
             log.debug("google_sheets_sync_ignored_status", tab=tab, status=status)
             continue
         vac_id = extract_vacancy_id(s.get("vacancy_url") or "", s.get("vacancy_id") or None)
         if vac_id:
-            update_map[vac_id] = new_status
+            update_map[vac_id] = (new_status or "", last_msg)
 
     log.info("google_sheets_sync_mapped", mapped_count=len(update_map))
     if not update_map:
@@ -444,7 +460,8 @@ def _sync_statuses_sync(parsed_statuses: list[dict]) -> SyncResult:
         url_idx = _header_index(header, "ссылка", default=1)
     status_idx = _header_index(header, "статус", default=7)
     vac_idx = _header_index(header, "vacancy id", default=9)
-    log.info("google_sheets_sync_columns", url_col=url_idx, status_col=status_idx)
+    msg_idx = _header_index(header, "последнее сообщение", default=12)
+    log.info("google_sheets_sync_columns", url_col=url_idx, status_col=status_idx, msg_col=msg_idx)
 
     updates = []
     matched_ids: set[str] = set()
@@ -453,6 +470,7 @@ def _sync_statuses_sync(parsed_statuses: list[dict]) -> SyncResult:
             continue
         url_col = row[url_idx] if len(row) > url_idx else ""
         current_status = row[status_idx] if len(row) > status_idx else ""
+        current_msg = row[msg_idx] if len(row) > msg_idx else ""
         vac_id = ""
         if vac_idx < len(row):
             vac_id = str(row[vac_idx]).strip()
@@ -460,16 +478,24 @@ def _sync_statuses_sync(parsed_statuses: list[dict]) -> SyncResult:
             vac_id = extract_vacancy_id(url_col)
         if not vac_id:
             continue
-        new_status = update_map.get(vac_id)
-        if not new_status:
+            
+        mapping = update_map.get(vac_id)
+        if not mapping:
             continue
+            
+        new_status, new_msg = mapping
         matched_ids.add(vac_id)
-        if _is_protected_status(current_status):
-            continue
-        if new_status != current_status:
+        
+        if new_status and new_status != current_status and not _is_protected_status(current_status):
             updates.append({
                 "range": f"{_col_letter(status_idx + 1)}{i + 1}",
                 "values": [[new_status]],
+            })
+            
+        if new_msg and new_msg != current_msg:
+            updates.append({
+                "range": f"{_col_letter(msg_idx + 1)}{i + 1}",
+                "values": [[new_msg]],
             })
 
     result.matched = len(matched_ids)
