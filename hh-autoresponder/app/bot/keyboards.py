@@ -182,13 +182,8 @@ GEMINI_MODELS = [
     ("gemini-3.7-flash", "🌟 gemini-3.7-flash (Сбалансированная)"),
     ("gemini-3.6-flash", "⚡️ gemini-3.6-flash (Основная)"),
     ("gemini-3.5-flash-lite", "🍃 gemini-3.5-flash-lite (Лимит 500/д)"),
-    ("gemma-4-31b", "🔹 gemma-4-31b"),
-    ("gemma-4-26b", "🔹 gemma-4-26b"),
-    ("gemma-3-27b", "🔹 gemma-3-27b"),
-    ("gemma-3-12b", "🔹 gemma-3-12b"),
-    ("gemma-3-4b", "🔹 gemma-3-4b"),
-    ("gemma-3-2b", "🔹 gemma-3-2b"),
-    ("gemma-3-1b", "🔹 gemma-3-1b"),
+    ("gemma-4-31b-it", "🔹 gemma-4-31b-it"),
+    ("gemma-4-26b-a4b-it", "🔹 gemma-4-26b-a4b-it"),
 ]
 
 OPENROUTER_FREE_MODELS = [
