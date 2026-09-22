@@ -331,6 +331,7 @@ class HHPlaywright:
                     # No navigation — modal opened instead, that's fine
                     pass
                 await page.wait_for_timeout(2000)
+                await self._solve_captcha_if_present(page)
 
             # Handle "Вы откликаетесь на вакансию в другой стране" / похожие модалки
             try:
@@ -383,6 +384,7 @@ class HHPlaywright:
                         pass
                 await submit_btn.click()
                 await page.wait_for_timeout(1500)
+                await self._solve_captcha_if_present(page)
 
                 # After submit also handle "foreign country" / confirm modals
                 try:
@@ -479,10 +481,64 @@ class HHPlaywright:
                 await self._save_debug_screenshot(page, "apply_error")
             except Exception:
                 pass
-            log.error("hh_apply_error", url=vacancy_url, error=str(e))
+            log.error("hh_apply_error", url=vacancy_url, error=str(e)[:100])
             return False
 
-    async def _fill_response_form(self, page: Page, cover_letter: str, vacancy_url: str):
+    async def _solve_captcha_if_present(self, page) -> bool:
+        """Checks for CAPTCHA, solves it using Claude Vision, and submits."""
+        captcha_input = await page.query_selector('input[placeholder="Текст с картинки"], input[data-qa="captcha-input"]')
+        if not captcha_input or not await captcha_input.is_visible():
+            return False
+            
+        from structlog import get_logger
+        log = get_logger()
+        log.warning("hh_captcha_detected", url=page.url)
+        for attempt in range(3):
+            captcha_img = await page.query_selector('img[src*="/captcha/"]')
+            if not captcha_img:
+                log.error("hh_captcha_no_image")
+                break
+                
+            img_bytes = await captcha_img.screenshot()
+            import base64
+            b64 = base64.b64encode(img_bytes).decode('utf-8')
+            
+            from app.ai.claude import claude_ai
+            try:
+                solved_text = await claude_ai.solve_captcha(b64)
+                log.info("hh_captcha_solved", attempt=attempt+1, result=solved_text)
+            except Exception as e:
+                log.error("hh_captcha_solve_error", error=str(e))
+                solved_text = ""
+                
+            if solved_text:
+                await captcha_input.fill(solved_text)
+                await page.wait_for_timeout(500)
+                
+                submit_btn = await page.query_selector('button:has-text("Отправить"), button:has-text("Подтвердить")')
+                if submit_btn:
+                    await submit_btn.click()
+                    await page.wait_for_timeout(3000)
+                    
+                    # Verify if it went away
+                    captcha_input = await page.query_selector('input[placeholder="Текст с картинки"]')
+                    if not captcha_input or not await captcha_input.is_visible():
+                        log.info("hh_captcha_success")
+                        return True
+                    else:
+                        log.warning("hh_captcha_failed_retry", attempt=attempt+1)
+                else:
+                    break
+            
+            refresh_btn = await page.query_selector('button[data-qa="captcha-refresh"]')
+            if refresh_btn:
+                await refresh_btn.click()
+                await page.wait_for_timeout(1500)
+                captcha_input = await page.query_selector('input[placeholder="Текст с картинки"], input[data-qa="captcha-input"]')
+                
+        return False
+
+    async def _fill_response_form(self, page, cover_letter: str, vacancy_url: str):
         """Fill cover letter, employer questions (test task), and resume picker."""
         from app.ai.claude import claude_ai, TEST_MODEL
         from app.config import settings as cfg
@@ -1054,6 +1110,7 @@ class HHPlaywright:
                                 || el.querySelector('a');
                             const companyEl = el.querySelector('[data-qa="negotiations-item-company"]');
                             const statusEl = el.querySelector('[data-qa="negotiations-item-status"], [data-qa*="negotiations-tag negotiations-item-"]');
+                            const msgEl = el.querySelector('[data-qa="negotiations-item-message"], .negotiations-item__message, .negotiations-item__message-text, .negotiations-item-message, [data-qa="negotiations-item-text"]');
                             const unreadEl = el.querySelector('.negotiations-item__unread, [data-qa="negotiations-item-unread"]');
                             const allLinks = Array.from(el.querySelectorAll('a')).map(a => a.getAttribute('href') || '').filter(Boolean);
                             out.push({
@@ -1062,6 +1119,7 @@ class HHPlaywright:
                                 all_links: allLinks,
                                 company: companyEl ? (companyEl.innerText || '').trim() : '',
                                 status: statusEl ? (statusEl.innerText || '').trim() : '',
+                                last_message: msgEl ? (msgEl.innerText || '').trim() : '',
                                 has_unread: !!unreadEl,
                             });
                         }
@@ -1124,6 +1182,7 @@ class HHPlaywright:
                             "title": d.get("title", ""),
                             "company": d.get("company", ""),
                             "status": d.get("status", ""),
+                            "last_message": d.get("last_message", ""),
                             "text": f"Статус: {d.get('status','')}" if d.get("status") else "",
                             "thread_id": thread_id,
                             "topic_url": full_topic_url,

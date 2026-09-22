@@ -219,6 +219,28 @@ class ClaudeAI:
             log.warning("update_env_model_failed", error=str(e))
         log.info("llm_model_changed", new_model=model_name)
 
+    async def clean_screener_answer(self, raw_answer: str) -> str:
+        """Очищает ответ от рассуждений и лишних фраз (обертка над фильтром)."""
+        return clean_cover_letter(raw_answer)
+
+    async def solve_captcha(self, base64_img: str) -> str:
+        """Отправляет картинку капчи в ИИ (использует модель с Vision) и возвращает распознанный текст."""
+        system = "You are an expert at solving CAPTCHAs. Return ONLY the text visible in the CAPTCHA image. Do not add any punctuation, markdown, or other text."
+        user_message = [
+            {"type": "text", "text": "Extract the text from this image:"},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_img}"}}
+        ]
+        # Для капчи используем либо дефолтную (должна поддерживать vision, как gpt-4o, gemini-3.5-flash),
+        # либо принудительно быструю модель (она тоже обычно поддерживает)
+        vision_model = self._get_fast_model()
+        if "qwen3.8-27b" in vision_model:  # qwen3.8-27b:free не умеет vision
+            vision_model = settings.llm_model  # fallback на основную модель
+            
+        resp, _, _ = await self._call(system, user_message, max_tokens=20, model=vision_model)
+        # Очищаем возможный мусор
+        cleaned = resp.replace("```", "").replace("\n", "").strip()
+        return cleaned
+
     async def get_available_models(self) -> list[str]:
         """Динамически получает актуальные модели Google из API / документации."""
         return await fetch_live_google_models()
@@ -232,7 +254,7 @@ class ClaudeAI:
             return "gemini-3.5-flash-lite"
         return settings.llm_model
 
-    async def _call(self, system: str, user_message: str, max_tokens: int = 1024, model: str | None = None) -> tuple[str, int, int]:
+    async def _call(self, system: str, user_message: str | list, max_tokens: int = 1024, model: str | None = None) -> tuple[str, int, int]:
         self.last_error = None
         if not _ai_ready():
             if not settings.ai_enabled:
