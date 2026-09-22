@@ -337,7 +337,7 @@ async def cb_regen_manual_cl(callback: CallbackQuery, state: FSMContext, **kw):
 
     await callback.message.edit_text("🤖 Перегенерирую письмо...", parse_mode="HTML")
 
-    force_model = "google/gemma-2-9b-it:free" if callback.data == "regen_manual_gemma" else None
+    force_model = "gemma-4-31b" if callback.data == "regen_manual_gemma" else None
 
     try:
         cover_text, _, _ = await claude_ai.generate_cover_letter(
@@ -1148,7 +1148,7 @@ async def cb_regen_cl(callback: CallbackQuery, **kw):
 
     await callback.message.edit_text("🤖 Перегенерирую письмо...")
 
-    force_model = "google/gemma-2-9b-it:free" if callback.data.startswith("regen_gemma:") else None
+    force_model = "gemma-4-31b" if callback.data.startswith("regen_gemma:") else None
     humanize = _scheduler.humanize_letters if _scheduler else False
     letter, _, _ = await claude_ai.generate_cover_letter(title, desc, "", humanize=humanize, force_model=force_model)
 
