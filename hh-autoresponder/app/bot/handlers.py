@@ -356,6 +356,11 @@ async def cb_regen_manual_cl(callback: CallbackQuery, state: FSMContext, **kw):
 @admin_only
 async def cb_fix_manual_cl(callback: CallbackQuery, state: FSMContext, **kw):
     await state.set_state(ManualCoverLetter.waiting_for_feedback)
+    prev_text = callback.message.text or ""
+    if "Готово:" in prev_text:
+        prev_text = prev_text.split("Готово:", 1)[-1].strip()
+    await state.update_data(previous_cover_letter=prev_text)
+    
     await callback.message.reply(
         "Напишите текстом, что нужно исправить (например: «напиши короче»):",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -380,6 +385,7 @@ async def handle_manual_cl_feedback(message: Message, state: FSMContext, **kw):
     description = data.get("description", "")
     company = data.get("company", "")
     original_msg_id = data.get("original_msg_id")
+    previous_cover_letter = data.get("previous_cover_letter", "")
     
     await state.set_state(ManualCoverLetter.done)
     
@@ -395,7 +401,8 @@ async def handle_manual_cl_feedback(message: Message, state: FSMContext, **kw):
             vacancy_description=description,
             company_name=company,
             humanize=settings.humanize_letters,
-            feedback=message.text
+            feedback=message.text,
+            previous_cover_letter=previous_cover_letter
         )
         
         try:
@@ -1152,7 +1159,15 @@ async def cb_regen_cl(callback: CallbackQuery, **kw):
 async def cb_fix_cl(callback: CallbackQuery, state: FSMContext, **kw):
     vacancy_id = int(callback.data.split(":")[1])
     await state.set_state(CoverLetterFix.waiting_for_feedback)
-    await state.update_data(vacancy_id=vacancy_id, original_msg_id=callback.message.message_id)
+    prev_text = callback.message.text or ""
+    if "Готово:" in prev_text:
+        prev_text = prev_text.split("Готово:", 1)[-1].strip()
+        
+    await state.update_data(
+        vacancy_id=vacancy_id, 
+        original_msg_id=callback.message.message_id,
+        previous_cover_letter=prev_text
+    )
     await callback.message.reply(
         "Напишите текстом, что нужно исправить (например: «напиши короче» или «убери упоминание AWS»):",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -1175,6 +1190,7 @@ async def handle_cl_feedback(message: Message, state: FSMContext, **kw):
     data = await state.get_data()
     vacancy_id = data.get("vacancy_id")
     original_msg_id = data.get("original_msg_id")
+    previous_cover_letter = data.get("previous_cover_letter", "")
     await state.clear()
 
     if not vacancy_id:
@@ -1191,7 +1207,7 @@ async def handle_cl_feedback(message: Message, state: FSMContext, **kw):
     processing_msg = await message.reply("🤖 Генерирую исправленный вариант...")
 
     humanize = _scheduler.humanize_letters if _scheduler else False
-    letter, _, _ = await claude_ai.generate_cover_letter(title, desc, "", humanize=humanize, feedback=message.text)
+    letter, _, _ = await claude_ai.generate_cover_letter(title, desc, "", humanize=humanize, feedback=message.text, previous_cover_letter=previous_cover_letter)
 
     await processing_msg.delete()
     await message.bot.edit_message_text(
