@@ -23,3 +23,4 @@ __pycache__/
 logs/
 *.log
 .DS_Store
+resume.txt
