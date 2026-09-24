@@ -73,6 +73,10 @@ class HHPlaywright:
     def __init__(self):
         self._logged_in = False
         self._page: Page | None = None
+        # CAPTCHA manual fallback state
+        self._captcha_event: asyncio.Event | None = None
+        self._captcha_text: str = ""
+        self._captcha_screenshot: bytes | None = None
 
     async def _get_page(self) -> Page:
         if self._page and not self._page.is_closed():
@@ -457,6 +461,7 @@ class HHPlaywright:
                     )
                     if err_text:
                         log.warning("hh_apply_validation_errors", errors=err_text[:3])
+                        return f"error: {err_text[0]}"
                 except Exception:
                     pass
 
@@ -485,58 +490,181 @@ class HHPlaywright:
             return False
 
     async def _solve_captcha_if_present(self, page) -> bool:
-        """Checks for CAPTCHA, solves it using Claude Vision, and submits."""
-        captcha_input = await page.query_selector('input[placeholder="Текст с картинки"], input[data-qa="captcha-input"]')
+        """Checks for CAPTCHA, solves it using AI Vision, and submits.
+
+        Fallback: if AI fails after 3 attempts, sends screenshot to Telegram
+        and waits for the user to type the CAPTCHA text manually (5 min timeout).
+        """
+        captcha_input = await page.query_selector(
+            'input[placeholder="Текст с картинки"], input[data-qa="captcha-input"]'
+        )
         if not captcha_input or not await captcha_input.is_visible():
             return False
-            
-        from structlog import get_logger
-        log = get_logger()
+
         log.warning("hh_captcha_detected", url=page.url)
+        import base64
+
+        # ── Phase 1: AI Vision attempts (3 tries) ──────────────────────
         for attempt in range(3):
             captcha_img = await page.query_selector('img[src*="/captcha/"]')
             if not captcha_img:
                 log.error("hh_captcha_no_image")
                 break
-                
+
             img_bytes = await captcha_img.screenshot()
-            import base64
             b64 = base64.b64encode(img_bytes).decode('utf-8')
-            
+
             from app.ai.claude import claude_ai
             try:
                 solved_text = await claude_ai.solve_captcha(b64)
-                log.info("hh_captcha_solved", attempt=attempt+1, result=solved_text)
+                log.info("hh_captcha_solved", attempt=attempt + 1, result=solved_text)
             except Exception as e:
                 log.error("hh_captcha_solve_error", error=str(e))
                 solved_text = ""
-                
+
             if solved_text:
                 await captcha_input.fill(solved_text)
                 await page.wait_for_timeout(500)
-                
-                submit_btn = await page.query_selector('button:has-text("Отправить"), button:has-text("Подтвердить")')
+
+                submit_btn = await page.query_selector(
+                    'button:has-text("Отправить"), button:has-text("Подтвердить")'
+                )
                 if submit_btn:
                     await submit_btn.click()
                     await page.wait_for_timeout(3000)
-                    
-                    # Verify if it went away
-                    captcha_input = await page.query_selector('input[placeholder="Текст с картинки"]')
+
+                    captcha_input = await page.query_selector(
+                        'input[placeholder="Текст с картинки"]'
+                    )
                     if not captcha_input or not await captcha_input.is_visible():
                         log.info("hh_captcha_success")
                         return True
                     else:
-                        log.warning("hh_captcha_failed_retry", attempt=attempt+1)
+                        log.warning("hh_captcha_failed_retry", attempt=attempt + 1)
                 else:
                     break
-            
+
             refresh_btn = await page.query_selector('button[data-qa="captcha-refresh"]')
             if refresh_btn:
                 await refresh_btn.click()
                 await page.wait_for_timeout(1500)
-                captcha_input = await page.query_selector('input[placeholder="Текст с картинки"], input[data-qa="captcha-input"]')
-                
+                captcha_input = await page.query_selector(
+                    'input[placeholder="Текст с картинки"], input[data-qa="captcha-input"]'
+                )
+
+        # ── Phase 2: Manual fallback via Telegram ──────────────────────
+        return await self._request_manual_captcha(page)
+
+    async def _request_manual_captcha(self, page) -> bool:
+        """Send CAPTCHA screenshot to Telegram and wait for user input.
+
+        Uses asyncio.Event so the Telegram handler can wake us up.
+        Returns True if CAPTCHA was solved, False on timeout/skip.
+        """
+        from app.utils import notifier
+
+        # Take a fresh screenshot of the captcha area (or full page)
+        captcha_img = await page.query_selector('img[src*="/captcha/"]')
+        if captcha_img:
+            self._captcha_screenshot = await captcha_img.screenshot()
+        else:
+            self._captcha_screenshot = await page.screenshot()
+
+        # Save screenshot to disk so Telegram handler can send it
+        screenshot_path = "data/debug_captcha_manual.png"
+        try:
+            from pathlib import Path
+            Path(screenshot_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(screenshot_path).write_bytes(self._captcha_screenshot)
+        except Exception as e:
+            log.warning("captcha_screenshot_save_error", error=str(e))
+
+        # Prepare the event for user input
+        self._captcha_event = asyncio.Event()
+        self._captcha_text = ""
+
+        # Notify user via Telegram
+        log.info("hh_captcha_requesting_manual_input")
+        await notifier.send(
+            "🔒 <b>Нужна помощь с CAPTCHA!</b>\n\n"
+            "AI не смог распознать капчу после 3 попыток.\n"
+            "Скриншот отправлен ниже. Введите текст с картинки.\n\n"
+            "⏱ Таймаут: 5 минут\n\n"
+            "Используйте кнопки или просто отправьте текст."
+        )
+
+        # Send the screenshot image via special callback
+        try:
+            from app.bot.captcha_notify import send_captcha_to_user
+            await send_captcha_to_user(screenshot_path)
+        except Exception as e:
+            log.warning("captcha_tg_send_error", error=str(e))
+
+        # Wait for user input with 5-minute timeout
+        CAPTCHA_TIMEOUT = 300  # seconds
+        try:
+            await asyncio.wait_for(self._captcha_event.wait(), timeout=CAPTCHA_TIMEOUT)
+        except asyncio.TimeoutError:
+            log.warning("hh_captcha_manual_timeout")
+            self._captcha_event = None
+            self._captcha_screenshot = None
+            await notifier.send("⏱ <b>Таймаут CAPTCHA</b> — отклик пропущен.")
+            return False
+
+        user_text = self._captcha_text.strip()
+        self._captcha_event = None
+        self._captcha_screenshot = None
+
+        if not user_text:
+            log.info("hh_captcha_manual_skipped")
+            return False
+
+        # Fill and submit the user's answer (allow 2 attempts for stale elements)
+        log.info("hh_captcha_manual_input", text=user_text)
+        for retry in (1, 2):
+            captcha_input = await page.query_selector(
+                'input[placeholder="Текст с картинки"], input[data-qa="captcha-input"]'
+            )
+            if not captcha_input:
+                break
+            try:
+                await captcha_input.fill(user_text)
+                await page.wait_for_timeout(500)
+
+                submit_btn = await page.query_selector(
+                    'button:has-text("Отправить"), button:has-text("Подтвердить")'
+                )
+                if submit_btn:
+                    await submit_btn.click()
+                    await page.wait_for_timeout(3000)
+
+                captcha_input = await page.query_selector(
+                    'input[placeholder="Текст с картинки"]'
+                )
+                if not captcha_input or not await captcha_input.is_visible():
+                    log.info("hh_captcha_manual_success")
+                    await notifier.send("✅ <b>CAPTCHA пройдена!</b> Отклик продолжается.")
+                    return True
+                else:
+                    log.warning("hh_captcha_manual_wrong", retry=retry)
+            except Exception as e:
+                log.warning("hh_captcha_manual_fill_error", error=str(e)[:120])
+                if retry == 1:
+                    await page.wait_for_timeout(500)
+                    continue
+                break
+
+        await notifier.send("❌ <b>CAPTCHA не пройдена</b> — текст оказался неверным.")
         return False
+
+    def resolve_captcha(self, text: str):
+        """Called by the Telegram handler to provide CAPTCHA text.
+
+        Sets the text and wakes up the waiting coroutine.
+        """
+        self._captcha_text = text
+        if self._captcha_event:
+            self._captcha_event.set()
 
     async def _fill_response_form(self, page, cover_letter: str, vacancy_url: str):
         """Fill cover letter, employer questions (test task), and resume picker."""

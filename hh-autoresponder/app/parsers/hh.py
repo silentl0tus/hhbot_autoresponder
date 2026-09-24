@@ -227,7 +227,7 @@ class HHParser:
             log.error("hh_details_error", url=url, error=str(e))
             return None
 
-    async def apply_to_vacancy(self, url: str, cover_letter: str, screenshot_name: str | None = None) -> bool:
+    async def apply_to_vacancy(self, url: str, cover_letter: str, screenshot_name: str | None = None) -> bool | str:
         """Apply via Playwright if available, otherwise skip."""
         pw = self._get_playwright()
         if pw:

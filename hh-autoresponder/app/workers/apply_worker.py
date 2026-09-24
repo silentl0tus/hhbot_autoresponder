@@ -309,6 +309,9 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
                 _emoji, _word = "↩️", "Уже откликались"
             else:
                 _emoji, _word = "❌", "Не удалось откликнуться"
+                if isinstance(result, str) and result.startswith("error:"):
+                    _word += f" ({result[6:].strip()})"
+                    
             _score_str = f"{int(vacancy.ai_score)}%" if vacancy.ai_score is not None else "—"
             await notifier.vlog(
                 f"{_emoji} <b>{_word}</b> · {_plat_label} · score {_score_str}\n"
