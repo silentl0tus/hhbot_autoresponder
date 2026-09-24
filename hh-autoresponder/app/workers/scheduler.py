@@ -816,20 +816,49 @@ class WorkerScheduler:
 
             result = SyncResult()
             if statuses:
-                # Обогащаем статусы сообщениями из чатов (поскольку API/отклики не отдают текст автоскринеров)
+                # Обогащаем статусы сообщениями из чатов.
+                # API HH больше не отдаёт чаты/переговоры, поэтому
+                # единственный надёжный источник — парсинг чат-списка
+                # через Playwright. Матчим по (company+title), с
+                # фолбеком на company-only.
                 try:
                     from app.parsers.hh_chat import hh_chat_parser
                     chats = await hh_chat_parser.get_unread_or_active_chats()
                     if chats:
-                        chat_map = {}
+                        # Два индекса: точный (company+title) и по компании
+                        chat_map_exact: dict[tuple[str, str], str] = {}
+                        chat_map_company: dict[str, str] = {}
                         for c in chats:
-                            key = (c.get("company") or "").lower().strip()
-                            if key:
-                                chat_map[key] = c.get("last_message", "")
+                            comp = (c.get("company") or "").lower().strip()
+                            title = (c.get("title") or "").lower().strip()
+                            msg = (c.get("last_message") or "").strip()
+                            if not msg:
+                                continue
+                            if comp and title:
+                                chat_map_exact[(comp, title)] = msg
+                            if comp:
+                                # Последний чат с этой компанией выигрывает
+                                chat_map_company[comp] = msg
+
+                        enriched = 0
                         for s in statuses:
-                            company = (s.get("company") or "").lower().strip()
-                            if company in chat_map and not s.get("last_message"):
-                                s["last_message"] = chat_map[company]
+                            comp = (s.get("company") or "").lower().strip()
+                            title = (s.get("title") or "").lower().strip()
+                            chat_msg = (
+                                chat_map_exact.get((comp, title))
+                                or chat_map_company.get(comp)
+                            )
+                            if chat_msg:
+                                s["last_message"] = chat_msg
+                                enriched += 1
+                        log.info(
+                            "sync_sheets_chat_enrichment_done",
+                            chats_found=len(chats),
+                            enriched=enriched,
+                            total_statuses=len(statuses),
+                        )
+                    else:
+                        log.info("sync_sheets_chat_enrichment_no_chats")
                 except Exception as e:
                     log.warning("sync_sheets_chat_enrichment_failed", error=str(e))
 
