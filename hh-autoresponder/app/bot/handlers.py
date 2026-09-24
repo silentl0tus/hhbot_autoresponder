@@ -91,6 +91,10 @@ class HhChatSG(StatesGroup):
     waiting_custom_idea = State()
 
 
+class CaptchaSG(StatesGroup):
+    waiting_for_text = State()
+
+
 _screener_state = {
     "question": "",
     "suggested_answer": "",
@@ -126,7 +130,7 @@ _hh_chat_task: asyncio.Task | None = None
 @admin_only
 async def cmd_start(message: Message, **kw):
     await message.answer(
-        "👋 <b>Job Hunter Bot v1.3</b>\n\n"
+        "👋 <b>Job Hunter Bot v1.5</b>\n\n"
         "Автоматический поиск вакансий и отклики на hh.ru\n"
         "Используй кнопки ниже 👇",
         parse_mode="HTML",
@@ -837,12 +841,15 @@ async def cb_ai_preset(callback: CallbackQuery, **kw):
 async def cb_ai_test_conn(callback: CallbackQuery, **kw):
     await callback.answer("⏳ Проверяю связь с AI...")
     ok, msg = await claude_ai.test_connection()
+    import html as _html
+    safe_msg = _html.escape(msg)
+    
     if ok:
         await callback.message.answer(
             f"✅ <b>Связь с AI успешна!</b>\n\n"
             f"📌 Модель: <code>{settings.llm_model}</code>\n"
             f"🌐 Провайдер: <code>{settings.llm_base_url}</code>\n"
-            f"💬 Ответ: <i>{msg}</i>",
+            f"💬 Ответ: <i>{safe_msg}</i>",
             parse_mode="HTML",
         )
     else:
@@ -850,7 +857,7 @@ async def cb_ai_test_conn(callback: CallbackQuery, **kw):
             f"❌ <b>Ошибка связи с AI!</b>\n\n"
             f"📌 Модель: <code>{settings.llm_model}</code>\n"
             f"🌐 Провайдер: <code>{settings.llm_base_url}</code>\n"
-            f"⚠️ Ошибка:\n<code>{msg}</code>",
+            f"⚠️ Ошибка:\n<code>{safe_msg}</code>",
             parse_mode="HTML",
         )
 
@@ -1220,16 +1227,23 @@ async def handle_cl_feedback(message: Message, state: FSMContext, **kw):
     humanize = _scheduler.humanize_letters if _scheduler else False
     letter, _, _ = await claude_ai.generate_cover_letter(title, desc, "", humanize=humanize, feedback=message.text, previous_cover_letter=previous_cover_letter)
 
-    await processing_msg.delete()
-    await message.bot.edit_message_text(
-        chat_id=message.chat.id,
-        message_id=original_msg_id,
-        text=letter,
-        reply_markup=confirm_apply_keyboard(vacancy_id),
-    )
+    try:
+        await processing_msg.delete()
+    except Exception:
+        pass
 
+    log.info("about_to_edit_message", new_text_len=len(letter), is_same=(letter == previous_cover_letter))
 
-
+    try:
+        await message.bot.edit_message_text(
+            chat_id=message.chat.id,
+            message_id=original_msg_id,
+            text=letter,
+            reply_markup=confirm_apply_keyboard(vacancy_id),
+        )
+    except Exception as e:
+        log.error("edit_cl_failed", error=str(e))
+        await message.reply(f"❌ Не удалось обновить сообщение (возможно текст не изменился). Ошибка: {e}")
 @router.callback_query(F.data.startswith("confirm_apply:"))
 @admin_only
 async def cb_confirm_apply(callback: CallbackQuery, **kw):
@@ -3114,4 +3128,55 @@ async def cb_hh_stop(callback: CallbackQuery, **kw):
     await callback.message.edit_text("🛑 <b>Мониторинг чатов hh.ru остановлен.</b>", parse_mode="HTML")
 
 
+# ── CAPTCHA manual input handlers ──────────────────────────────────────
 
+
+@router.callback_query(F.data == "captcha_enter")
+@admin_only
+async def cb_captcha_enter(callback: CallbackQuery, state: FSMContext, **kw):
+    """User clicked 'Enter text' — switch to FSM state to receive input."""
+    await state.set_state(CaptchaSG.waiting_for_text)
+    await callback.answer()
+    await callback.message.reply(
+        "✏️ Введите текст с картинки CAPTCHA:",
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data == "captcha_skip")
+@admin_only
+async def cb_captcha_skip(callback: CallbackQuery, state: FSMContext, **kw):
+    """User clicked 'Skip' — resolve captcha with empty string."""
+    await state.clear()
+    try:
+        from app.parsers.hh_playwright import hh_playwright
+        if hh_playwright:
+            hh_playwright.resolve_captcha("")
+    except ImportError:
+        pass
+    await callback.answer("⏭ CAPTCHA пропущена")
+    await callback.message.edit_caption(
+        caption="⏭ CAPTCHA пропущена — отклик будет отмечен как ошибка.",
+    )
+
+
+@router.message(CaptchaSG.waiting_for_text)
+@admin_only
+async def captcha_text_received(message: Message, state: FSMContext, **kw):
+    """User sent the CAPTCHA text — pass it to the waiting Playwright coroutine."""
+    text = (message.text or "").strip()
+    await state.clear()
+    if not text:
+        await message.reply("❌ Пустой текст. Попробуйте ещё раз или нажмите 'Пропустить'.")
+        return
+    try:
+        from app.parsers.hh_playwright import hh_playwright
+        if hh_playwright:
+            hh_playwright.resolve_captcha(text)
+    except ImportError:
+        pass
+    await message.reply(
+        f"✅ Отправлено: <code>{text}</code>\n"
+        "Ожидаем результат...",
+        parse_mode="HTML",
+    )
