@@ -486,7 +486,11 @@ class HHPlaywright:
                 await self._save_debug_screenshot(page, "apply_error")
             except Exception:
                 pass
-            log.error("hh_apply_error", url=vacancy_url, error=str(e)[:100])
+            err_msg = str(e)
+            if err_msg.startswith("error:"):
+                log.warning("hh_apply_aborted", url=vacancy_url, reason=err_msg)
+                return err_msg
+            log.error("hh_apply_error", url=vacancy_url, error=err_msg[:100])
             return False
 
     async def _solve_captcha_if_present(self, page) -> bool:
@@ -1050,6 +1054,8 @@ class HHPlaywright:
                 log.info("hh_letter_filled", chars=len(cover_letter))
             else:
                 log.warning("hh_letter_fill_failed", chars=len(cover_letter))
+                if cfg.skip_if_no_cover_letter:
+                    raise RuntimeError("error: Не удалось прикрепить сопроводительное письмо")
 
         # 3. Resume picker (if multiple resumes)
         resume_select = await page.query_selector('[data-qa="vacancy-response-popup-form-resume-dropdown"]')
