@@ -253,6 +253,21 @@ async def run_vacancy_analysis():
 
                     details = await detail_parser.get_vacancy_details(vacancy.url)
                     if details:
+                        # Вакансия ушла в архив — пометить как REJECTED и не тратить отклики
+                        if getattr(details, "is_archived", False):
+                            log.info(
+                                "vacancy_archived_skip",
+                                vacancy_id=vacancy.id,
+                                title=vacancy.title,
+                                url=vacancy.url,
+                            )
+                            async with async_session() as session:
+                                v = await session.get(Vacancy, vacancy.id)
+                                if v:
+                                    v.status = VacancyStatus.ARCHIVED
+                                    v.ai_reason = "Вакансия в архиве"
+                                    await session.commit()
+                            continue
                         description = details.description or ""
                         if details.skills:
                             skills_str = json.dumps(details.skills, ensure_ascii=False)

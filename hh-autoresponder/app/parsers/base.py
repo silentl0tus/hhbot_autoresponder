@@ -28,6 +28,7 @@ class ParsedVacancy:
     salary_currency: str = ""
     location: str = ""
     is_remote: bool = False
+    is_archived: bool = False
     experience: str = ""
     employment_type: str = ""
     skills: list[str] = field(default_factory=list)

@@ -156,6 +156,12 @@ class HHParser:
                     resp = await client.get(f"https://api.hh.ru/vacancies/{vacancy_id}")
                     if resp.status_code == 200:
                         data = resp.json()
+
+                        # Архивная вакансия — сразу сообщаем об этом, не тратим токены на отклик.
+                        is_archived = bool(data.get("archived", False))
+                        if is_archived:
+                            log.info("hh_vacancy_archived", vacancy_id=vacancy_id, url=url)
+
                         raw_desc = data.get("description", "")
                         clean_desc = html.unescape(re.sub(r"<[^>]+>", " ", raw_desc)).strip()
                         skills = [s.get("name", "") for s in data.get("key_skills", []) if s.get("name")]
@@ -169,6 +175,7 @@ class HHParser:
                             title=data.get("name", ""),
                             description=clean_desc,
                             company_name=company_name,
+                            is_archived=is_archived,
                             experience=(data.get("experience", {}) or {}).get("name", ""),
                             employment_type=(data.get("employment", {}) or {}).get("name", ""),
                             skills=skills,
