@@ -105,6 +105,13 @@ def clean_cover_letter(text: str) -> str:
         filtered_lines.append(line)
 
     result = "\n".join(filtered_lines).strip()
+    
+    # Удаляем любые упоминания "ИИ-балл", которые мог добавить гуманизатор
+    result = re.sub(r"(?i)\n*ии-балл:?\s*\d*(/\d*)?\s*.*$", "", result).strip()
+    
+    # На всякий случай удаляем плейсхолдеры в конце, если они просочились
+    result = re.sub(r"(?i)\n*с уважением,\s*\[?вставьте\s*(своё|ваше)?\s*имя\]?.*$", "", result).strip()
+
     if (result.startswith('"') and result.endswith('"')) or (result.startswith('«') and result.endswith('»')):
         result = result[1:-1].strip()
 
@@ -442,7 +449,13 @@ class ClaudeAI:
 
         if humanize:
             humanize_system = get_humanizer_prompt()
-            humanize_msg = f"Очеловечь следующий текст сопроводительного письма, используя свои правила:\n\n{text}"
+            strict_rules = (
+                "\n\nКРИТИЧЕСКИЕ ОГРАНИЧЕНИЯ ДЛЯ ЭТОЙ ЗАДАЧИ:\n"
+                "1. НЕ добавляй приветствия, прощания, подписи или метки-заполнители (никаких 'С уважением', '[Вставьте ваше имя]' и т.д.). Текст должен начинаться и обрываться строго по существу.\n"
+                "2. Выведи ТОЛЬКО финальный текст отклика. Категорически запрещено выводить 'ИИ-балл' или любые мета-комментарии (несмотря на правила в системном промпте).\n"
+                "3. Сохраняй все технические факты из оригинала, не придумывай новый опыт."
+            )
+            humanize_msg = f"Очеловечь следующий текст сопроводительного письма, применяя свои правила.{strict_rules}\n\nТекст:\n{text}"
             humanized_text, h_inp, h_out = await self._call(humanize_system, humanize_msg, max_tokens=2500, model=self._get_fast_model())
             if humanized_text and re.search(r"[а-яёА-ЯЁ]", humanized_text):
                 text = clean_cover_letter(humanized_text)
