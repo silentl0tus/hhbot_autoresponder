@@ -387,6 +387,32 @@ class HHOAuth:
                         out.append(_classify(it))
                 except Exception:
                     break
+        # Подгружаем последние чаты, чтобы добавить last_message
+        chat_map = {}
+        async with httpx.AsyncClient(timeout=20) as c:
+            try:
+                for cp in range(3):  # 3 страницы = 60 последних чатов
+                    r_chats = await c.get(
+                        "https://api.hh.ru/chats", headers=headers, params={"per_page": 20, "page": cp}
+                    )
+                    if r_chats.status_code != 200:
+                        break
+                    items = r_chats.json().get("chats", {}).get("items", [])
+                    if not items:
+                        break
+                    for chat in items:
+                        last_msg = (
+                            chat.get("messages", {}).get("last", {}).get("body", {}).get("text", {}).get("content", "")
+                        )
+                        for nid in chat.get("resources", {}).get("negotiations", []):
+                            chat_map[str(nid)] = last_msg
+            except Exception as e:
+                log.warning("negotiations_status_chats_error", error=str(e))
+
+        for item in out:
+            if item["id"] in chat_map:
+                item["last_message"] = chat_map[item["id"]]
+
         from collections import Counter as _C
 
         _tabs = _C(s["tab"] for s in out)
