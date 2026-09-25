@@ -456,7 +456,7 @@ class ClaudeAI:
                 "3. Сохраняй все технические факты из оригинала, не придумывай новый опыт."
             )
             humanize_msg = f"Очеловечь следующий текст сопроводительного письма, применяя свои правила.{strict_rules}\n\nТекст:\n{text}"
-            humanized_text, h_inp, h_out = await self._call(humanize_system, humanize_msg, max_tokens=2500, model=self._get_fast_model())
+            humanized_text, h_inp, h_out = await self._call(humanize_system, humanize_msg, max_tokens=2500, model=settings.llm_model)
             if humanized_text and re.search(r"[а-яёА-ЯЁ]", humanized_text):
                 text = clean_cover_letter(humanized_text)
             else:

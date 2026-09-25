@@ -51,12 +51,30 @@ def _is_quiet_hours() -> bool:
 
 
 async def main():
+    from pathlib import Path
+    import logging
+    import sys
+
+    Path("logs").mkdir(exist_ok=True)
+    
+    logging.basicConfig(
+        format="%(message)s",
+        level=logging.INFO,
+        handlers=[
+            logging.FileHandler("logs/log.txt", mode="a", encoding="utf-8"),
+            logging.StreamHandler(sys.stdout)
+        ],
+    )
+    
     structlog.configure(
         processors=[
+            structlog.stdlib.add_log_level,
             structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.add_log_level,
-            structlog.dev.ConsoleRenderer(),
+            structlog.dev.ConsoleRenderer(colors=False),
         ],
+        wrapper_class=structlog.stdlib.BoundLogger,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
     )
 
     log.info("starting_job_hunter")
