@@ -110,7 +110,7 @@ def clean_cover_letter(text: str) -> str:
     result = re.sub(r"(?i)\n*ии-балл:?\s*\d*(/\d*)?\s*.*$", "", result).strip()
     
     # На всякий случай удаляем плейсхолдеры в конце, если они просочились
-    result = re.sub(r"(?i)\n*с уважением,\s*\[?вставьте\s*(своё|ваше)?\s*имя\]?.*$", "", result).strip()
+    result = re.sub(r"(?i)\n*с уважением,\s*\[?(вставьте\s*)?(своё|ваше)?\s*имя\]?.*$", "", result).strip()
 
     if (result.startswith('"') and result.endswith('"')) or (result.startswith('«') and result.endswith('»')):
         result = result[1:-1].strip()
