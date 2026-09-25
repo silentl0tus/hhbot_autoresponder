@@ -1,4 +1,5 @@
 import re
+import typing
 import math
 from typing import Optional
 
@@ -133,7 +134,7 @@ class HabrParser(BaseParser):
             log.warning("habr_check_msgs_not_supported", reason="playwright not available")
             return []
 
-    async def apply_to_vacancy(self, url: str, cover_letter: str, screenshot_name: str | None = None) -> bool:
+    async def apply_to_vacancy(self, url: str, cover_letter: str | typing.Callable, screenshot_name: str | None = None) -> bool:
         """Apply via Playwright if available, otherwise skip."""
         try:
             from app.parsers.habr_playwright import habr_playwright

@@ -58,3 +58,24 @@ async def send_captcha_to_user(screenshot_path: str) -> None:
         reply_markup=keyboard,
     )
     log.info("captcha_screenshot_sent_to_user", chat_id=_chat_id)
+    log.info("captcha_screenshot_sent_to_user", chat_id=_chat_id)
+
+async def send_error_screenshot(screenshot_path: str, caption: str) -> None:
+    """Send a generic error screenshot to the admin Telegram chat."""
+    if _bot is None or _chat_id is None:
+        return
+
+    path = Path(screenshot_path)
+    if not path.exists():
+        return
+
+    photo = BufferedInputFile(path.read_bytes(), filename=path.name)
+    try:
+        await _bot.send_photo(
+            chat_id=_chat_id,
+            photo=photo,
+            caption=caption,
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        log.warning("error_screenshot_send_failed", error=str(e))

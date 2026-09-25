@@ -30,12 +30,13 @@ async def init_db():
     log.info("database_initialized")
 
 
-async def notify_telegram(bot: Bot, text: str):
+async def notify_telegram(bot: Bot, text: str, reply_markup=None):
     try:
         await bot.send_message(
             chat_id=settings.tg_admin_chat_id,
             text=text,
             parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup,
         )
     except Exception as e:
         log.error("telegram_notify_error", error=str(e))
@@ -92,6 +93,10 @@ async def main():
     from app.utils import notifier
     notifier.configure(lambda text: notify_telegram(bot, text), verbose=True)
 
+    # Wire up CAPTCHA screenshot sender (used by hh_playwright manual fallback).
+    from app.bot.captcha_notify import configure as captcha_configure
+    captcha_configure(bot, settings.tg_admin_chat_id)
+
     playwright_ok = HAS_PLAYWRIGHT
     if playwright_ok:
         try:
@@ -104,7 +109,7 @@ async def main():
         log.info("playwright_not_available", mode="api_only")
 
     scheduler = WorkerScheduler(
-        notify_callback=lambda text: notify_telegram(bot, text)
+        notify_callback=lambda text, reply_markup=None: notify_telegram(bot, text, reply_markup=reply_markup)
     )
     set_scheduler(scheduler)
     scheduler.start()

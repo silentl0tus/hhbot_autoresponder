@@ -180,21 +180,82 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
     for vacancy in vacancies:
         if vacancy.platform in aborted_platforms:
             continue
+
+        # Dynamic mid-cycle check for pause and limits
         try:
-            if ai_cover_letters and settings.ai_enabled and settings.llm_api_key:
-                from app.ai.claude import claude_ai
-                # Сбрасываем ошибку предыдущего цикла, чтобы она не просочилась
-                # в уведомление при обработке текущей вакансии.
-                claude_ai.last_error = None
-                cname = vacancy.company.name if vacancy.company else ""
-                letter, _, _ = await claude_ai.generate_cover_letter(
-                    vacancy_title=vacancy.title,
-                    vacancy_description=vacancy.description or "",
-                    company_name=cname,
-                    humanize=humanize_letters
-                )
-            else:
-                letter = render_letter(vacancy.title)
+            import json as _json
+            from pathlib import Path as _Path
+            _sf = _Path("data/scheduler_state.json")
+            if _sf.exists():
+                _st = _json.loads(_sf.read_text())
+                if _st.get("is_paused", False):
+                    log.info("auto_apply_paused_mid_cycle")
+                    break
+                if not _st.get("auto_apply", False) and auto_mode:
+                    log.info("auto_apply_disabled_mid_cycle")
+                    break
+                
+                # Check if this platform was paused manually
+                paused_plats = set(_st.get("paused_platforms", [])) | set(_st.get("manual_paused_platforms", []))
+                if vacancy.platform in paused_plats:
+                    aborted_platforms.add(vacancy.platform)
+                    continue
+
+                # Check dynamic limit
+                plat_limit = _st.get(f"max_applies_per_day_{vacancy.platform}", 999)
+                async with async_session() as session:
+                    today_cnt = (await session.execute(
+                        select(func.count(Application.id))
+                        .where(
+                            Application.status == ApplicationStatus.SENT,
+                            Application.platform == vacancy.platform,
+                            func.date(Application.created_at) == func.current_date()
+                        )
+                    )).scalar() or 0
+                if today_cnt >= plat_limit:
+                    log.info("daily_limit_reached_mid_cycle", platform=vacancy.platform)
+                    aborted_platforms.add(vacancy.platform)
+                    continue
+                
+                # Update AI flags
+                humanize_letters = _st.get("humanize_letters", False)
+                ai_cover_letters = _st.get("ai_cover_letters", False)
+                pass_tests = _st.get("pass_tests", True)
+        except Exception:
+            pass
+
+        try:
+            letter = None
+            letter_box = {"text": ""}
+            async with async_session() as session:
+                prev_app = (await session.execute(
+                    select(Application)
+                    .where(Application.vacancy_id == vacancy.id)
+                    .order_by(Application.created_at.desc())
+                    .limit(1)
+                )).scalar_one_or_none()
+                if prev_app and prev_app.cover_letter:
+                    letter = prev_app.cover_letter
+
+            if not letter:
+                async def generate_letter():
+                    if ai_cover_letters and settings.ai_enabled and settings.llm_api_key:
+                        from app.ai.claude import claude_ai
+                        claude_ai.last_error = None
+                        cname = vacancy.company.name if vacancy.company else ""
+                        ai_letter, _, _ = await claude_ai.generate_cover_letter(
+                            vacancy_title=vacancy.title,
+                            vacancy_description=vacancy.description or "",
+                            company_name=cname,
+                            humanize=humanize_letters
+                        )
+                        letter_box["text"] = ai_letter
+                        return ai_letter
+                    else:
+                        text = render_letter(vacancy.title)
+                        letter_box["text"] = text
+                        return text
+                letter = generate_letter
 
             # HH через Playwright (эмуляция браузера для обхода блокировок API)
             result = False
@@ -248,10 +309,11 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
             async with async_session() as session:
                 if not already:
                     # Don't log application if already applied
+                    final_letter = letter_box["text"] if callable(letter) else letter
                     app = Application(
                         vacancy_id=vacancy.id,
                         platform=vacancy.platform,
-                        cover_letter=letter,
+                        cover_letter=final_letter,
                         status=ApplicationStatus.SENT if success else ApplicationStatus.FAILED,
                         attempt_count=1,
                     )
@@ -287,7 +349,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
                         company=company_name,
                         url=vacancy.url or "",
                         status="Ждем ответа" if success else "Ошибка",
-                        cover_letter=letter,
+                        cover_letter=final_letter,
                         ai_score=vacancy.ai_score,
                         platform=vacancy.platform or "",
                         salary=salary_str,

@@ -112,7 +112,7 @@ def analyze_vacancy(
             }
 
     # 4. Считаем балл
-    score = 30  # совпал заголовок
+    score = 15  # совпал заголовок (снижено с 30 для обязательного наличия стека/бонусов)
     score += negative_penalty  # штраф за стоп-слово (если был)
 
     stack_hits = sum(1 for kw in settings.stack_keywords if kw.lower() in full)

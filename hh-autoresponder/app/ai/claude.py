@@ -111,15 +111,10 @@ def clean_cover_letter(text: str) -> str:
     return result
 
 
-OPENROUTER_FREE_FALLBACK_MODELS = [
-    "qwen/qwen3.8-27b:free",
-    "liquid/lfm-2.5-2.6b:free",
-    "nvidia/nemotron-3.5-lightning:free",
-    "nex-agi/nex-n2.5-pro:free",
-    "nex-agi/nex-n2.5-mini:free",
-    "dots-studio/dots-3-note-preview:free",
-    "thinkingmachines/inkling-small:free",
-    "poolside/laguna-s-2.1:free"
+OPENROUTER_FALLBACK_MODELS = [
+    "anthropic/claude-3-haiku",
+    "openai/gpt-4o-mini",
+    "google/gemini-1.5-flash",
 ]
 
 # Паттерны «отказа ассистента» — модель не следует промпту и пишет сервисное сообщение.
@@ -273,7 +268,7 @@ class ClaudeAI:
 
         is_openrouter = "openrouter" in settings.llm_base_url
         if is_openrouter:
-            for fb in OPENROUTER_FREE_FALLBACK_MODELS:
+            for fb in OPENROUTER_FALLBACK_MODELS:
                 if fb not in fallback_chain:
                     fallback_chain.append(fb)
         elif "generativelanguage" in settings.llm_base_url:
@@ -330,13 +325,13 @@ class ClaudeAI:
                 if text:
                     # Если ответ получен через fallback-модель, автоматически переключаем активную модель
                     if candidate_model != primary_model:
+                        settings.llm_model = candidate_model
                         log.info(
-                            "llm_fallback_switched",
+                            "llm_fallback_used",
                             prev_model=primary_model,
-                            new_model=candidate_model,
+                            fallback_model=candidate_model,
                             attempt=attempt_idx + 1,
                         )
-                        self.set_model(candidate_model)
 
                     usage = data.get("usage") or {}
                     return (

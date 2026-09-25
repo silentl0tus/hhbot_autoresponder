@@ -45,18 +45,18 @@ async def check_all_messages() -> list[dict]:
 
 async def _save_message(msg: dict) -> dict | None:
     async with async_session() as session:
-        # Dedup by thread_id when present
+        # Dedup by thread_id AND text so status changes trigger a new notification
         if msg.get("thread_id"):
             existing = await session.scalar(
                 select(RecruiterMessage.id).where(
-                    RecruiterMessage.external_thread_id == msg["thread_id"]
+                    RecruiterMessage.external_thread_id == msg["thread_id"],
+                    RecruiterMessage.text == msg.get("text", msg.get("status", ""))
                 )
             )
             if existing:
                 return None
         else:
-            # No thread_id — dedup by platform+title+company+status to avoid
-            # re-notifying every 5 min for the same chats
+            # No thread_id — dedup by platform+title+company+status
             existing = await session.scalar(
                 select(RecruiterMessage.id).where(
                     RecruiterMessage.platform == msg.get("platform", ""),

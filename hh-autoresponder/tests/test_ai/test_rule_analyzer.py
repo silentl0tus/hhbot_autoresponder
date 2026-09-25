@@ -90,3 +90,51 @@ def test_reason_includes_matched_pattern(mocker):
     res = analyze_vacancy(title, "", skills="")
     assert res["score"] == 0
     assert "паттерн" in res["reason"]
+
+
+def test_base_score_is_15_without_stack(mocker):
+    """Тест: Если заголовок совпадает, но нет совпадений по стеку, базовый балл равен 15."""
+    mocker.patch("app.ai.rule_analyzer.settings",
+                 target_keywords=["python"],
+                 negative_keywords=[],
+                 stack_keywords=["fastapi", "docker"])
+    title = "Python разработчик"
+    desc = "Пишем на неизвестном фреймворке."
+    res = analyze_vacancy(title, desc, skills="")
+    
+    assert res["score"] == 15
+    assert res["stack_match"] == 0
+
+
+def test_soft_negative_penalty(mocker):
+    """Тест: Если есть и стоп-слово, и целевое слово, дается штраф -10, но не дисквалификация (score > 0)."""
+    mocker.patch("app.ai.rule_analyzer.settings",
+                 target_keywords=["python"],
+                 negative_keywords=["стажер"],
+                 stack_keywords=["fastapi"])
+    # Включаем и целевое слово и негативное в заголовок
+    title = "Стажер Python"
+    desc = "Опыт не важен. Стек: fastapi."
+    res = analyze_vacancy(title, desc, skills="")
+    
+    # Base = 15, Penalty = -10, Stack = +5. Total = 10.
+    assert res["score"] == 10
+    assert "negative_keyword_soft" in res["red_flags"]
+    assert res["is_relevant"] is False
+
+
+def test_stack_keywords_score(mocker):
+    """Тест: Каждое найденное слово из стека прибавляет баллы."""
+    mocker.patch("app.ai.rule_analyzer.settings",
+                 target_keywords=["python"],
+                 negative_keywords=[],
+                 stack_keywords=["fastapi", "docker", "postgresql", "redis"])
+    title = "Python developer"
+    desc = "Требуется опыт с FastAPI, Docker. Знание postgresql будет плюсом."
+    res = analyze_vacancy(title, desc, skills="")
+    
+    # 3 stack matches: fastapi, docker, postgresql (each gives 5, total 15)
+    # Base: 15. Total: 30.
+    assert res["score"] == 30
+    assert res["stack_match"] > 0
+

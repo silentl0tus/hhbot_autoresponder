@@ -52,7 +52,7 @@ class TestHHParserArchivedFlag:
         mock_client.get = AsyncMock(return_value=mock_resp)
 
         with (
-            patch("app.parsers.hh_oauth.HHOAuthClient.get_token", new_callable=AsyncMock, return_value="tok"),
+            patch("app.parsers.hh_oauth.hh_oauth.get_token", new_callable=AsyncMock, return_value="tok"),
             patch("app.parsers.hh.httpx.AsyncClient", return_value=mock_client),
         ):
             parser = HHParser()
@@ -83,7 +83,7 @@ class TestHHParserArchivedFlag:
         mock_client.get = AsyncMock(return_value=mock_resp)
 
         with (
-            patch("app.parsers.hh_oauth.HHOAuthClient.get_token", new_callable=AsyncMock, return_value="tok"),
+            patch("app.parsers.hh_oauth.hh_oauth.get_token", new_callable=AsyncMock, return_value="tok"),
             patch("app.parsers.hh.httpx.AsyncClient", return_value=mock_client),
         ):
             parser = HHParser()

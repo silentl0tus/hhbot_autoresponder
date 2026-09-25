@@ -8,8 +8,10 @@ from app.utils.anti_detect import random_delay
 log = structlog.get_logger()
 HABR_STATE_PATH = Path("data/browser_sessions/habr_state.json")
 
+import typing
+
 class HabrPlaywright:
-    async def apply_to_vacancy(self, url: str, cover_letter: str) -> bool:
+    async def apply_to_vacancy(self, url: str, cover_letter: str | typing.Callable) -> bool:
         if not HABR_STATE_PATH.exists():
             log.error("habr_apply_error", reason="No session state", path=str(HABR_STATE_PATH))
             return False
@@ -38,6 +40,12 @@ class HabrPlaywright:
                     # Cover letter text area
                     textarea = page.locator("textarea[name*='message'], textarea[id*='message']").first
                     if await textarea.count() > 0:
+                        if callable(cover_letter):
+                            try:
+                                cover_letter = await cover_letter() if asyncio.iscoroutinefunction(cover_letter) else cover_letter()
+                            except Exception as e:
+                                log.error("habr_deferred_cover_letter_error", error=str(e))
+                                cover_letter = ""
                         await textarea.fill(cover_letter)
                         await random_delay(1, 3)
                         

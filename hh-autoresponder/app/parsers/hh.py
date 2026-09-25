@@ -1,4 +1,5 @@
 import re
+import typing
 
 import httpx
 import structlog
@@ -211,6 +212,11 @@ class HHParser:
             company_el = soup.select_one('[data-qa="vacancy-company-name"]')
             company = company_el.get_text(strip=True) if company_el else ""
 
+            is_archived = False
+            if "вакансия в архиве" in resp.text.lower():
+                is_archived = True
+                log.info("hh_vacancy_archived_html", vacancy_id=vacancy_id, url=url)
+
             return ParsedVacancy(
                 platform="hh",
                 external_id=vacancy_id,
@@ -218,6 +224,7 @@ class HHParser:
                 title=title,
                 description=description,
                 company_name=company,
+                is_archived=is_archived,
                 experience=experience,
                 employment_type=employment,
                 skills=skills,
@@ -227,7 +234,7 @@ class HHParser:
             log.error("hh_details_error", url=url, error=str(e))
             return None
 
-    async def apply_to_vacancy(self, url: str, cover_letter: str, screenshot_name: str | None = None) -> bool | str:
+    async def apply_to_vacancy(self, url: str, cover_letter: str | typing.Callable, screenshot_name: str | None = None) -> bool | str:
         """Apply via Playwright if available, otherwise skip."""
         pw = self._get_playwright()
         if pw:

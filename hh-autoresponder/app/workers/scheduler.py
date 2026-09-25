@@ -41,12 +41,7 @@ class WorkerScheduler:
         self.notify_messages = state.get("notify_messages", True)
         self.thank_rejections = state.get("thank_rejections", True)
         self.bump_resume = state.get("bump_resume", True)
-        if "selected_llm_model" in state:
-            saved_model = state["selected_llm_model"]
-            if "openrouter" in settings.llm_base_url and ("gemini" in saved_model or "deepseek-v4" in saved_model):
-                settings.llm_model = "nex-agi/nex-n2.5-pro:free"
-            else:
-                settings.llm_model = saved_model
+        # llm_model теперь читается напрямую из .env, игнорируем state
         self.min_ai_score = 30
         self.notify = notify_callback  # async fn(text) -> sends to TG
 
@@ -120,7 +115,7 @@ class WorkerScheduler:
             state["notify_messages"] = self.notify_messages
             state["thank_rejections"] = self.thank_rejections
             state["bump_resume"] = self.bump_resume
-            state["selected_llm_model"] = settings.llm_model
+            # llm_model сохраняется в .env, не нужно дублировать в state
             state["paused_platforms"] = sorted(self.paused_platforms)
             state["manual_paused_platforms"] = sorted(self.manual_paused_platforms)
             state["last_login_alert"] = self._last_login_alert
@@ -162,10 +157,10 @@ class WorkerScheduler:
 
         return False
 
-    async def _notify_if_allowed(self, text: str):
+    async def _notify_if_allowed(self, text: str, reply_markup=None):
         """Отправить уведомление только в разрешённое время."""
         if self.notify and not self._is_quiet_hours():
-            await self.notify(text)
+            await self.notify(text, reply_markup=reply_markup)
 
     def start(self):
         interval = settings.check_interval_sec
@@ -409,7 +404,9 @@ class WorkerScheduler:
                     f"{title_line}\n\n"
                     f"{msg.get('text', '')[:600]}"
                 )
-                await self._notify_if_allowed(text)
+                from app.bot.keyboards import message_keyboard
+                kb = message_keyboard(msg.get("id")) if msg.get("id") else None
+                await self._notify_if_allowed(text, reply_markup=kb)
         except Exception as e:
             log.error("job_messages_error", error=str(e))
 
@@ -759,7 +756,7 @@ class WorkerScheduler:
         log.info("auto_apply_set", enabled=enabled)
 
     # Флаги «что делает бот» для меню с галочками
-    FLAG_NAMES = ("auto_apply", "pass_tests", "notify_messages", "thank_rejections", "bump_resume", "ai_cover_letters")
+    FLAG_NAMES = ("auto_apply", "pass_tests", "notify_messages", "thank_rejections", "bump_resume", "ai_cover_letters", "humanize_letters")
 
     def get_flags(self) -> dict:
         return {n: bool(getattr(self, n, True)) for n in self.FLAG_NAMES}

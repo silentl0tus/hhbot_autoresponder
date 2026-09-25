@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 import httpx
 from app.config import settings
-from app.ai.claude import ClaudeAI, OPENROUTER_FREE_FALLBACK_MODELS
+from app.ai.claude import ClaudeAI, OPENROUTER_FALLBACK_MODELS
 
 
 @pytest.mark.asyncio
@@ -48,7 +48,7 @@ async def test_claude_ai_fallback_on_http_error():
         assert inp == 10
         assert out == 5
         # Проверяем, что активная модель обновилась на рабочую
-        assert settings.llm_model == OPENROUTER_FREE_FALLBACK_MODELS[0]
+        assert settings.llm_model == OPENROUTER_FALLBACK_MODELS[0]
 
 
 @pytest.mark.asyncio
