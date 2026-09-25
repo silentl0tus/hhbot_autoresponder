@@ -36,7 +36,7 @@
 
 [![License](https://img.shields.io/badge/License-MIT-22c55e?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.12+-3776AB?style=flat-square&logo=python&logoColor=white)]()
-[![Version](https://img.shields.io/badge/version-1.3.0-e63946?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-1.4.0-e63946?style=flat-square)]()
 
 </div>
 
@@ -63,7 +63,7 @@
 ## 🌟 Ключевые особенности и возможности
 
 - 🤖 **100% Бесплатный AI-слой:**
-  - Поддержка провайдера **OpenRouter** со сверхбыстрой бесплатной моделью **`deepseek/deepseek-v4-flash-0731:free`** (работает с нулевым балансом).
+  - Поддержка провайдера **OpenRouter** со сверхбыстрой бесплатной моделью **`nex-agi/nex-n2.5-pro:free`** (работает с нулевым балансом).
   - Поддержка **Google Gemini** (бесплатный тариф Gemini Flash).
   - Надежный таймаут запросов (240 сек) и поддержка thinking/reasoning моделей (автоматическое извлечение ответов из полей рассуждения).
   - Экономия ресурсов: фильтрация вакансий по стоп-словам и стеку выполняется локально через `Rule Analyzer` без обращения к LLM. Нейросеть привлекается строго для составления письма под конкретную вакансию.
@@ -130,13 +130,12 @@
    # Выбор AI провайдера (по умолчанию бесплатный OpenRouter)
    LLM_PROVIDER=openrouter
    OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxx     # Бесплатный ключ с openrouter.ai
-   LLM_MODEL=deepseek/deepseek-v4-flash-0731:free           # 100% бесплатная модель
+   LLM_MODEL=nex-agi/nex-n2.5-pro:free           # 100% бесплатная модель
 
    # Поисковые запросы на hh.ru (через точку с запятой)
    SEARCH_QUERIES=Python разработчик;Backend developer;Django;FastAPI
 
-   # Фильтрация по опыту, зарплате и ключевым словам
-   EXPERIENCE=between1And3
+   # Фильтрация по ключевым словам
    TARGET_KEYWORDS=python,fastapi,django,postgresql,asyncio,docker
    NEGATIVE_KEYWORDS=bitrix,1c,senior,lead,php,wordpress
    ```
@@ -194,11 +193,11 @@ chmod +x run_linux.sh login_linux.sh
    - **Windows:** `run_windows.bat`
 2. Откройте вашего бота в Telegram и отправьте команду `/start`.
 3. Перейдите в меню **«💎 Баланс AI»** (или «⚙️ Настройки» ➡️ «🤖 Настройки ИИ»):
-   - Убедитесь, что выбран провайдер **OpenRouter** (активная модель: `deepseek/deepseek-v4-flash-0731:free`).
+   - Убедитесь, что выбран провайдер **OpenRouter** (активная модель: `nex-agi/nex-n2.5-pro:free`).
    - Нажмите **«⚡ Проверить подключение»**. Бот отправит тестовый запрос и пришлет отчет:
      ```text
      ✅ Тест AI пройден успешно!
-     Модель: deepseek/deepseek-v4-flash-0731:free
+     Модель: nex-agi/nex-n2.5-pro:free
      Время ответа: 2.15 сек
      ```
 4. В главном меню нажмите кнопку **«🟢 Автоотклик»**.
