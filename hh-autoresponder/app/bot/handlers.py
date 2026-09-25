@@ -130,7 +130,7 @@ _hh_chat_task: asyncio.Task | None = None
 @admin_only
 async def cmd_start(message: Message, **kw):
     await message.answer(
-        "👋 <b>Job Hunter Bot v1.5.1</b>\n\n"
+        "👋 <b>Job Hunter Bot v1.5.2</b>\n\n"
         "Автоматический поиск вакансий и отклики на hh.ru\n"
         "Используй кнопки ниже 👇",
         parse_mode="HTML",

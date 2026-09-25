@@ -419,40 +419,67 @@ class HHPlaywright:
                 except Exception:
                     pass
 
-                # Wait up to 12s for any of: URL change to negotiations,
-                # success element, or visible 'отклик отправлен' text
-                success = False
-                for _ in range(12):
-                    await page.wait_for_timeout(1000)
-                    if "/applicant/negotiations" in page.url or "vacancy_response_success" in page.url:
+            # Wait up to 12s for any of: URL change to negotiations,
+            # success element, or visible 'отклик отправлен' text
+            # This is done REGARDLESS of whether submit_btn was clicked (1-click apply support)
+            success = False
+            for _ in range(12):
+                await page.wait_for_timeout(1000)
+                if "/applicant/negotiations" in page.url or "vacancy_response_success" in page.url:
+                    success = True
+                    break
+                try:
+                    if await page.query_selector('[data-qa="vacancy-response-link-view-topic"]'):
                         success = True
                         break
+                    if await page.query_selector('[data-qa*="response-success"], [class*="response-success"]'):
+                        success = True
+                        break
+                    # Check text on page for confirmation
+                    body_text = await page.evaluate("() => document.body.innerText")
+                    if "отклик отправлен" in body_text.lower() or "вы откликнулись" in body_text.lower() or "резюме доставлено" in body_text.lower():
+                        success = True
+                        break
+                except Exception:
+                    pass
+
+            if success:
+                # УРА! Отклик прошел успешно. Теперь мы не тратим токены на мертвые вакансии!
+                # Смотрим, есть ли кнопка "Приложить сопроводительное письмо"
+                if cover_letter and callable(cover_letter):
+                    attach_btn = await page.query_selector('button:has-text("Приложить сопроводительное письмо"), span:has-text("Приложить сопроводительное письмо"), a:has-text("Приложить сопроводительное письмо")')
+                    if attach_btn:
+                        log.info("hh_attaching_deferred_cover_letter_after_success")
+                        await attach_btn.click()
+                        await page.wait_for_timeout(1000)
+                        # Генерируем письмо (тратим токены только сейчас!)
+                        try:
+                            import asyncio
+                            cl_text = await cover_letter() if asyncio.iscoroutinefunction(cover_letter) else cover_letter()
+                            if cl_text:
+                                # Ищем появившееся текстовое поле
+                                ta = await page.query_selector('textarea[placeholder*="опроводительн"], [data-qa="vacancy-response-popup-form-letter-input"]')
+                                if ta and await ta.is_visible():
+                                    await ta.fill(cl_text)
+                                    await page.wait_for_timeout(500)
+                                    # Кликаем отправить письмо
+                                    send_btn = await page.query_selector('button:has-text("Сохранить"), button:has-text("Отправить"), button:has-text("Отправить письмо")')
+                                    if send_btn:
+                                        await send_btn.click()
+                                        await page.wait_for_timeout(1000)
+                        except Exception as e:
+                            log.error("hh_deferred_cover_letter_attach_error", error=str(e))
+                
+                if screenshot_name:
                     try:
-                        if await page.query_selector('[data-qa="vacancy-response-link-view-topic"]'):
-                            success = True
-                            break
-                        if await page.query_selector('[data-qa*="response-success"], [class*="response-success"]'):
-                            success = True
-                            break
-                        # Check text on page for confirmation
-                        body_text = await page.evaluate("() => document.body.innerText")
-                        if "отклик отправлен" in body_text.lower() or "вы откликнулись" in body_text.lower() or "резюме доставлено" in body_text.lower():
-                            success = True
-                            break
+                        await page.screenshot(path=f"data/test_apply_{screenshot_name}_after.png")
                     except Exception:
                         pass
+                log.info("hh_apply_success", url=vacancy_url, final=page.url)
+                await browser_manager.save_context("hh")
+                return True
 
-                if success:
-                    if screenshot_name:
-                        try:
-                            await page.screenshot(path=f"data/test_apply_{screenshot_name}_after.png")
-                        except Exception:
-                            pass
-                    log.info("hh_apply_success", url=vacancy_url, final=page.url)
-                    await browser_manager.save_context("hh")
-                    return True
-
-                # Look for inline validation errors
+            if submit_btn:
                 try:
                     err_text = await page.evaluate(
                         """() => {
@@ -463,6 +490,26 @@ class HHPlaywright:
                     if err_text:
                         log.warning("hh_apply_validation_errors", errors=err_text[:3])
                         
+                        # Если вакансия ЖЕСТКО требует сопроводительное
+                        if any("опроводительное письмо" in e.lower() for e in err_text) and cover_letter and callable(cover_letter):
+                            log.info("hh_cover_letter_strictly_required_generating_now")
+                            try:
+                                import asyncio
+                                cl_text = await cover_letter() if asyncio.iscoroutinefunction(cover_letter) else cover_letter()
+                                if cl_text:
+                                    ta = await page.query_selector('textarea[placeholder*="опроводительн"], [data-qa="vacancy-response-popup-form-letter-input"]')
+                                    if ta and await ta.is_visible():
+                                        await ta.fill(cl_text)
+                                        await submit_btn.click()
+                                        await page.wait_for_timeout(2000)
+                                        body_text = await page.evaluate("() => document.body.innerText")
+                                        if "отклик отправлен" in body_text.lower() or "вы откликнулись" in body_text.lower() or "резюме доставлено" in body_text.lower():
+                                            log.info("hh_apply_success_after_mandatory_cover_letter", url=vacancy_url)
+                                            await browser_manager.save_context("hh")
+                                            return True
+                            except Exception as e:
+                                log.error("hh_mandatory_cover_letter_error", error=str(e))
+
                         # Если капча введена неверно (ИИ ошибся), даем шанс на повторное решение
                         if "неверный текст" in err_text[0].lower():
                             log.info("hh_retrying_captcha_after_validation_error")
@@ -560,99 +607,110 @@ class HHPlaywright:
         Returns True if CAPTCHA was solved, False on timeout/skip.
         """
         from app.utils import notifier
+        import asyncio
 
-        # Take a fresh screenshot of the captcha area (or full page)
-        IMG_SELECTOR = 'img[src*="/captcha/"], img[data-qa*="captcha"], [data-qa="captcha-picture"], .bloko-modal img, [role="dialog"] img'
-        captcha_img = await page.query_selector(IMG_SELECTOR)
-        if captcha_img:
-            self._captcha_screenshot = await captcha_img.screenshot()
-        else:
-            self._captcha_screenshot = await page.screenshot()
-
-        # Save screenshot to disk so Telegram handler can send it
-        screenshot_path = "data/debug_captcha_manual.png"
-        try:
-            from pathlib import Path
-            Path(screenshot_path).parent.mkdir(parents=True, exist_ok=True)
-            Path(screenshot_path).write_bytes(self._captcha_screenshot)
-        except Exception as e:
-            log.warning("captcha_screenshot_save_error", error=str(e))
-
-        # Prepare the event for user input
-        self._captcha_event = asyncio.Event()
-        self._captcha_text = ""
-
-        # Notify user via Telegram
-        log.info("hh_captcha_requesting_manual_input")
-        await notifier.send(
-            "🔒 <b>Ввод CAPTCHA!</b>\n\n"
-            "Скриншот отправлен ниже. Пожалуйста, введите текст с картинки.\n\n"
-            "⏱ Таймаут: 5 минут\n\n"
-            "Используйте кнопки или просто отправьте текст."
-        )
-
-        # Send the screenshot image via special callback
-        try:
-            from app.bot.captcha_notify import send_captcha_to_user
-            await send_captcha_to_user(screenshot_path)
-        except Exception as e:
-            log.warning("captcha_tg_send_error", error=str(e))
-
-        # Wait for user input with 5-minute timeout
         CAPTCHA_TIMEOUT = 300  # seconds
-        try:
-            await asyncio.wait_for(self._captcha_event.wait(), timeout=CAPTCHA_TIMEOUT)
-        except asyncio.TimeoutError:
-            log.warning("hh_captcha_manual_timeout")
+
+        for attempt in range(1, 4):
+            # Take a fresh screenshot of the captcha area (or full page)
+            IMG_SELECTOR = 'img[src*="/captcha/"], img[data-qa*="captcha"], [data-qa="captcha-picture"], .bloko-modal img, [role="dialog"] img'
+            captcha_img = await page.query_selector(IMG_SELECTOR)
+            if captcha_img:
+                self._captcha_screenshot = await captcha_img.screenshot()
+            else:
+                self._captcha_screenshot = await page.screenshot()
+
+            # Save screenshot to disk so Telegram handler can send it
+            screenshot_path = "data/debug_captcha_manual.png"
+            try:
+                from pathlib import Path
+                Path(screenshot_path).parent.mkdir(parents=True, exist_ok=True)
+                Path(screenshot_path).write_bytes(self._captcha_screenshot)
+            except Exception as e:
+                log.warning("captcha_screenshot_save_error", error=str(e))
+
+            # Prepare the event for user input
+            self._captcha_event = asyncio.Event()
+            self._captcha_text = ""
+
+            # Notify user via Telegram
+            log.info("hh_captcha_requesting_manual_input", attempt=attempt)
+            msg = "🔒 <b>Ввод CAPTCHA!</b>\n\nСкриншот отправлен ниже. Пожалуйста, введите текст с картинки.\n\n⏱ Таймаут: 5 минут\n\nИспользуйте кнопки или просто отправьте текст."
+            if attempt > 1:
+                msg = f"❌ <b>Текст не подошел (Попытка {attempt}/3).</b>\n\n" + msg
+            
+            await notifier.send(msg)
+
+            # Send the screenshot image via special callback
+            try:
+                from app.bot.captcha_notify import send_captcha_to_user
+                await send_captcha_to_user(screenshot_path)
+            except Exception as e:
+                log.warning("captcha_tg_send_error", error=str(e))
+
+            # Wait for user input with 5-minute timeout
+            try:
+                await asyncio.wait_for(self._captcha_event.wait(), timeout=CAPTCHA_TIMEOUT)
+            except asyncio.TimeoutError:
+                log.warning("hh_captcha_manual_timeout")
+                self._captcha_event = None
+                self._captcha_screenshot = None
+                await notifier.send("⏱ <b>Таймаут CAPTCHA</b> — отклик пропущен.")
+                return False
+
+            user_text = self._captcha_text.strip()
             self._captcha_event = None
             self._captcha_screenshot = None
-            await notifier.send("⏱ <b>Таймаут CAPTCHA</b> — отклик пропущен.")
-            return False
 
-        user_text = self._captcha_text.strip()
-        self._captcha_event = None
-        self._captcha_screenshot = None
+            if not user_text:
+                log.info("hh_captcha_manual_skipped")
+                return False
 
-        if not user_text:
-            log.info("hh_captcha_manual_skipped")
-            return False
-
-        # Fill and submit the user's answer (allow 2 attempts for stale elements)
-        log.info("hh_captcha_manual_input", text=user_text)
-        for retry in (1, 2):
-            captcha_input = await page.query_selector(
-                'input[placeholder*="Текст с картинки"], input[placeholder*="Код с картинки"], input[data-qa="captcha-input"], input[name="captchaText"]'
-            )
-            if not captcha_input:
-                break
-            try:
-                await captcha_input.fill(user_text)
-                await page.wait_for_timeout(500)
-
-                submit_btn = await page.query_selector(
-                    'button:has-text("Отправить"), button:has-text("Подтвердить")'
-                )
-                if submit_btn:
-                    await submit_btn.click()
-                    await page.wait_for_timeout(3000)
-
+            # Fill and submit the user's answer
+            log.info("hh_captcha_manual_input", text=user_text)
+            
+            # Allow 2 inner retries for stale element references
+            success_filling = False
+            for retry in (1, 2):
                 captcha_input = await page.query_selector(
                     'input[placeholder*="Текст с картинки"], input[placeholder*="Код с картинки"], input[data-qa="captcha-input"], input[name="captchaText"]'
                 )
-                if not captcha_input or not await captcha_input.is_visible():
-                    log.info("hh_captcha_manual_success")
-                    await notifier.send("✅ <b>CAPTCHA пройдена!</b> Отклик продолжается.")
-                    return True
-                else:
-                    log.warning("hh_captcha_manual_wrong", retry=retry)
-            except Exception as e:
-                log.warning("hh_captcha_manual_fill_error", error=str(e)[:120])
-                if retry == 1:
+                if not captcha_input:
+                    # Captcha disappeared?
+                    success_filling = True
+                    break
+                try:
+                    await captcha_input.fill(user_text)
                     await page.wait_for_timeout(500)
-                    continue
-                break
 
-        await notifier.send("❌ <b>CAPTCHA не пройдена</b> — текст оказался неверным.")
+                    submit_btn = await page.query_selector(
+                        'button:has-text("Отправить"), button:has-text("Подтвердить")'
+                    )
+                    if submit_btn:
+                        await submit_btn.click()
+                        await page.wait_for_timeout(3000)
+                    
+                    success_filling = True
+                    break
+                except Exception as e:
+                    log.warning("hh_captcha_manual_fill_error", error=str(e)[:120])
+                    if retry == 1:
+                        await page.wait_for_timeout(500)
+                        continue
+            
+            # Check if captcha is still there
+            captcha_input = await page.query_selector(
+                'input[placeholder*="Текст с картинки"], input[placeholder*="Код с картинки"], input[data-qa="captcha-input"], input[name="captchaText"]'
+            )
+            if not captcha_input or not await captcha_input.is_visible():
+                log.info("hh_captcha_manual_success")
+                await notifier.send("✅ <b>CAPTCHA пройдена!</b> Отклик продолжается.")
+                return True
+            else:
+                log.warning("hh_captcha_manual_wrong", attempt=attempt)
+                # It will loop to attempt+1 and ask the user again with a fresh screenshot
+
+        await notifier.send("❌ <b>CAPTCHA не пройдена</b> — исчерпаны попытки.")
         return False
 
     def resolve_captcha(self, text: str):
@@ -1024,15 +1082,11 @@ class HHPlaywright:
 
         if cover_letter:
             if callable(cover_letter):
-                log.info("hh_cover_letter_generating_deferred")
-                try:
-                    import asyncio
-                    cover_letter = await cover_letter() if asyncio.iscoroutinefunction(cover_letter) else cover_letter()
-                except Exception as e:
-                    log.error("hh_deferred_cover_letter_error", error=str(e))
-                    cover_letter = ""
-
-        if cover_letter:
+                # Пропускаем заполнение на этом этапе, чтобы не тратить токены.
+                # Письмо будет прикреплено после успешного отклика.
+                log.info("hh_skipping_cover_letter_in_form_to_save_tokens")
+                return
+            
             filled = False
             for attempt in (1, 2, 3):
                 el = letter_area if attempt == 1 else await _refind_letter()
