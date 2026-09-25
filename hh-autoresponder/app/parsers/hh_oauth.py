@@ -11,6 +11,7 @@ Flow:
 3. POST api.hh.ru/negotiations (Bearer token + vacancy_id + resume_id) → apply
 4. Token cached + refreshed automatically
 """
+
 from __future__ import annotations
 
 import json
@@ -255,7 +256,8 @@ class HHOAuth:
                 not body_text
                 or "token" in body_text.lower()
                 or "unauthorized" in body_text.lower()
-                or "auth" in body_text.lower() and "applied" not in body_text.lower()
+                or "auth" in body_text.lower()
+                and "applied" not in body_text.lower()
             )
             if looks_like_auth_dead and "already" not in body_text.lower():
                 log.warning("oauth_token_died_retrying", body=body_text[:200])
@@ -288,12 +290,23 @@ class HHOAuth:
                 return "already", {"data": d}
             if "test" in low or "questionnaire" in low:
                 return False, {"error": "needs_test", "data": d}
-            if "archived" in low or "not_found" in low or "vacancy_not_found" in low or "unavailable" in low or "hidden" in low:
+            if (
+                "archived" in low
+                or "not_found" in low
+                or "vacancy_not_found" in low
+                or "unavailable" in low
+                or "hidden" in low
+            ):
                 return "already", {"error": "unavailable", "data": d}
             # hh.ru сам запретил отклик ("Can't respond to specified vacancy") —
             # часто требование к резюме/гео/seniority. Помечаем как "already",
             # чтобы не накапливать FAILED и не блокировать вакансию в failed_3plus.
-            if "application_denied" in low or "can't respond" in low or "cant respond" in low or "respond to specified" in low:
+            if (
+                "application_denied" in low
+                or "can't respond" in low
+                or "cant respond" in low
+                or "respond to specified" in low
+            ):
                 return "already", {"error": "application_denied", "data": d}
             return False, {"error": err_value or "bad_request", "status": r.status_code, "data": d}
         if r.status_code == 401:
@@ -328,6 +341,7 @@ class HHOAuth:
             else:
                 tab = "pending"  # response / consider / прочее = без ответа
             return {
+                "id": str(item.get("id") or ""),
                 "tab": tab,
                 "title": vac.get("name") or "",
                 "company": emp.get("name") or "",
@@ -346,7 +360,8 @@ class HHOAuth:
             try:
                 r = await c.get(
                     "https://api.hh.ru/negotiations",
-                    headers=headers, params={**base_params, "page": 0},
+                    headers=headers,
+                    params={**base_params, "page": 0},
                 )
                 data = r.json()
             except Exception as e:
@@ -362,7 +377,8 @@ class HHOAuth:
                 try:
                     rp = await c.get(
                         "https://api.hh.ru/negotiations",
-                        headers=headers, params={**base_params, "page": p},
+                        headers=headers,
+                        params={**base_params, "page": p},
                     )
                     for it in rp.json().get("items", []):
                         if it.get("id") in seen:
@@ -372,6 +388,7 @@ class HHOAuth:
                 except Exception:
                     break
         from collections import Counter as _C
+
         _tabs = _C(s["tab"] for s in out)
         log.info("negotiations_status_done", total=len(out), tabs=dict(_tabs))
         return out
@@ -430,9 +447,7 @@ class HHOAuth:
             log.warning("neg_delete_error", nid=nid, error=str(e))
         return False
 
-    async def clear_negotiations(
-        self, older_than_days: int | None = None, dry_run: bool = False
-    ) -> dict:
+    async def clear_negotiations(self, older_than_days: int | None = None, dry_run: bool = False) -> dict:
         """Удалить отклики.
 
         older_than_days=None  → только отказы (state == "discard").
@@ -476,9 +491,7 @@ class HHOAuth:
                     names.append(vac_name)
                 continue
 
-            ok = await self._delete_negotiation(
-                str(neg.get("id")), with_decline_message=not is_discard
-            )
+            ok = await self._delete_negotiation(str(neg.get("id")), with_decline_message=not is_discard)
             if ok:
                 deleted += 1
                 if len(names) < 30:
@@ -518,9 +531,7 @@ class HHOAuth:
                     if not res.get("can_publish_or_update"):
                         blocked += 1
                         continue
-                    pr = await c.post(
-                        f"https://api.hh.ru/resumes/{rid}/publish", headers=headers
-                    )
+                    pr = await c.post(f"https://api.hh.ru/resumes/{rid}/publish", headers=headers)
                     if pr.status_code in (200, 204):
                         bumped += 1
                         if len(titles) < 10:

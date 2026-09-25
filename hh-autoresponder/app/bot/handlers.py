@@ -1,5 +1,4 @@
 import asyncio
-import json
 import functools
 import structlog
 
@@ -22,7 +21,6 @@ from app.bot.keyboards import (
     main_menu,
     vacancy_keyboard,
     vacancy_list_keyboard,
-    message_keyboard,
     confirm_apply_keyboard,
     manual_cover_keyboard,
     settings_keyboard,
@@ -36,7 +34,6 @@ from app.bot.keyboards import (
     hh_chat_card_keyboard,
     hh_chat_menu_keyboard,
     hh_chat_list_keyboard,
-    models_keyboard,
     custom_ai_keyboard,
 )
 from app.parsers.max_screener import max_screener
@@ -62,6 +59,7 @@ def admin_only(fn):
         if str(chat_id) != settings.tg_admin_chat_id:
             return
         return await fn(event, **kwargs)
+
     return wrapper
 
 
@@ -70,16 +68,20 @@ def _company_name(vacancy) -> str:
         return vacancy.company.name
     return ""
 
+
 class ManualCoverLetter(StatesGroup):
     waiting_for_url_or_text = State()
     done = State()
     waiting_for_feedback = State()
 
+
 class CoverLetterFix(StatesGroup):
     waiting_for_feedback = State()
 
+
 class SettingsSG(StatesGroup):
     waiting_for_custom_limit = State()
+
 
 class MaxScreenerSG(StatesGroup):
     waiting_edited_answer = State()
@@ -120,11 +122,10 @@ _hh_chat_state = {
 _hh_chat_task: asyncio.Task | None = None
 
 
-
-
 # ══════════════════════════════════════════════════════════════
 #  КОМАНДЫ И КНОПКИ МЕНЮ
 # ══════════════════════════════════════════════════════════════
+
 
 @router.message(Command("start"))
 @admin_only
@@ -144,63 +145,72 @@ async def cmd_start(message: Message, **kw):
 async def btn_stats(message: Message, **kw):
     async with async_session() as session:
         # By-platform vacancy counts
-        platform_rows = (await session.execute(
-            select(Vacancy.platform, func.count(Vacancy.id))
-            .group_by(Vacancy.platform)
-        )).all()
+        platform_rows = (
+            await session.execute(select(Vacancy.platform, func.count(Vacancy.id)).group_by(Vacancy.platform))
+        ).all()
         platform_vac = {p: c for p, c in platform_rows}
 
         # By-platform application counts (today + total sent)
-        app_today_rows = (await session.execute(
-            select(Application.platform, func.count(Application.id))
-            .where(
-                Application.status == ApplicationStatus.SENT,
-                func.date(Application.created_at) == func.current_date(),
+        app_today_rows = (
+            await session.execute(
+                select(Application.platform, func.count(Application.id))
+                .where(
+                    Application.status == ApplicationStatus.SENT,
+                    func.date(Application.created_at) == func.current_date(),
+                )
+                .group_by(Application.platform)
             )
-            .group_by(Application.platform)
-        )).all()
+        ).all()
         app_today = {p: c for p, c in app_today_rows}
 
-        app_total_rows = (await session.execute(
-            select(Application.platform, func.count(Application.id))
-            .where(Application.status == ApplicationStatus.SENT)
-            .group_by(Application.platform)
-        )).all()
+        app_total_rows = (
+            await session.execute(
+                select(Application.platform, func.count(Application.id))
+                .where(Application.status == ApplicationStatus.SENT)
+                .group_by(Application.platform)
+            )
+        ).all()
         app_total = {p: c for p, c in app_total_rows}
 
-        failed_today = await session.scalar(
-            select(func.count(Application.id)).where(
-                Application.status == ApplicationStatus.FAILED,
-                func.date(Application.created_at) == func.current_date(),
+        failed_today = (
+            await session.scalar(
+                select(func.count(Application.id)).where(
+                    Application.status == ApplicationStatus.FAILED,
+                    func.date(Application.created_at) == func.current_date(),
+                )
             )
-        ) or 0
+            or 0
+        )
 
-        new = await session.scalar(
-            select(func.count(Vacancy.id)).where(Vacancy.status == VacancyStatus.NEW)
-        ) or 0
-        analyzed = await session.scalar(
-            select(func.count(Vacancy.id)).where(Vacancy.status == VacancyStatus.ANALYZED)
-        ) or 0
-        approved = await session.scalar(
-            select(func.count(Vacancy.id)).where(Vacancy.status == VacancyStatus.APPROVED)
-        ) or 0
+        new = await session.scalar(select(func.count(Vacancy.id)).where(Vacancy.status == VacancyStatus.NEW)) or 0
+        analyzed = (
+            await session.scalar(select(func.count(Vacancy.id)).where(Vacancy.status == VacancyStatus.ANALYZED)) or 0
+        )
+        approved = (
+            await session.scalar(select(func.count(Vacancy.id)).where(Vacancy.status == VacancyStatus.APPROVED)) or 0
+        )
 
         # Recruiter messages by platform
-        msg_rows = (await session.execute(
-            select(RecruiterMessage.platform, func.count(RecruiterMessage.id))
-            .group_by(RecruiterMessage.platform)
-        )).all()
+        msg_rows = (
+            await session.execute(
+                select(RecruiterMessage.platform, func.count(RecruiterMessage.id)).group_by(RecruiterMessage.platform)
+            )
+        ).all()
         msg_by_plat = {p: c for p, c in msg_rows}
 
-        avg_score = await session.scalar(
-            select(func.avg(Vacancy.ai_score)).where(Vacancy.ai_score.is_not(None))
-        )
+        avg_score = await session.scalar(select(func.avg(Vacancy.ai_score)).where(Vacancy.ai_score.is_not(None)))
 
     score_text = f"{avg_score:.0f}" if avg_score else "—"
 
     PLATFORMS = [
         ("hh", "hh.ru", _scheduler.max_applies_per_day_hh if _scheduler else settings.max_applies_per_day_hh_max),
-        ("habr", "Хабр Карьера", getattr(_scheduler, "max_applies_per_day_habr", settings.max_applies_per_day_habr_max) if _scheduler else settings.max_applies_per_day_habr_max),
+        (
+            "habr",
+            "Хабр Карьера",
+            getattr(_scheduler, "max_applies_per_day_habr", settings.max_applies_per_day_habr_max)
+            if _scheduler
+            else settings.max_applies_per_day_habr_max,
+        ),
     ]
     by_plat_lines = []
     for code, label, cap in PLATFORMS:
@@ -236,8 +246,7 @@ async def btn_stats(message: Message, **kw):
         f"  • Сегодня: <b>{total_today}/{total_cap}</b>\n"
         f"  • Ошибок сегодня: <b>{failed_today}</b>\n"
         f"  • Всего отправлено: <b>{total_all}</b>\n\n"
-        "🏷 <b>По платформам:</b>\n\n"
-        + "\n\n".join(by_plat_lines),
+        "🏷 <b>По платформам:</b>\n\n" + "\n\n".join(by_plat_lines),
         parse_mode="HTML",
         reply_markup=stats_keyboard(),
     )
@@ -247,6 +256,7 @@ async def btn_stats(message: Message, **kw):
 @admin_only
 async def btn_inbox(message: Message, **kw):
     from app.services.inbox import collect_inbox, format_inbox
+
     data = await collect_inbox(_scheduler)
     text = format_inbox(data, heading=True)
     await message.answer(text, parse_mode="HTML")
@@ -277,16 +287,17 @@ async def btn_manual_cover(message: Message, state: FSMContext, **kw):
 async def process_manual_cover(message: Message, state: FSMContext, **kw):
     await state.clear()
     text = message.text.strip()
-    
+
     if text.startswith("http"):
         await message.answer("🔄 Загружаю вакансию по ссылке...")
         from app.parsers.hh import HHParser
+
         parser = HHParser()
         vacancy = await parser.get_vacancy_details(text)
         if not vacancy:
             await message.answer("❌ Не удалось получить данные по ссылке.")
             return
-        
+
         title = vacancy.title
         description = vacancy.description
         company = vacancy.company_name
@@ -297,27 +308,29 @@ async def process_manual_cover(message: Message, state: FSMContext, **kw):
         company = ""
 
     await message.answer("⏳ Генерирую сопроводительное письмо...")
-    
+
     # Сохраняем данные для перегенерации
     await state.set_state(ManualCoverLetter.done)
     await state.update_data(title=title, description=description, company=company)
-    
+
     try:
         cover_text, _, _ = await claude_ai.generate_cover_letter(
             vacancy_title=title,
             vacancy_description=description,
             company_name=company,
-            humanize=settings.humanize_letters
+            humanize=settings.humanize_letters,
         )
-        
+
         if claude_ai.last_error:
             await message.answer(
                 f"⚠️ <b>Ошибка LLM API:</b>\n<code>{claude_ai.last_error}</code>\n\n"
                 f"📝 Использован шаблон по умолчанию:\n\n{cover_text}",
-                parse_mode="HTML"
+                parse_mode="HTML",
             )
         elif cover_text:
-            msg = await message.answer(f"✅ <b>Готово:</b>\n\n{cover_text}", parse_mode="HTML", reply_markup=manual_cover_keyboard())
+            msg = await message.answer(
+                f"✅ <b>Готово:</b>\n\n{cover_text}", parse_mode="HTML", reply_markup=manual_cover_keyboard()
+            )
             await state.update_data(original_msg_id=msg.message_id)
         else:
             err = claude_ai.last_error or "LLM вернула пустой ответ"
@@ -334,7 +347,7 @@ async def cb_regen_manual_cl(callback: CallbackQuery, state: FSMContext, **kw):
     title = data.get("title", "")
     description = data.get("description", "")
     company = data.get("company", "")
-    
+
     if not title and not description:
         await callback.answer("Нет данных для перегенерации.")
         return
@@ -349,10 +362,12 @@ async def cb_regen_manual_cl(callback: CallbackQuery, state: FSMContext, **kw):
             vacancy_description=description,
             company_name=company,
             humanize=settings.humanize_letters,
-            force_model=force_model
+            force_model=force_model,
         )
         if cover_text:
-            await callback.message.edit_text(f"✅ <b>Готово:</b>\n\n{cover_text}", parse_mode="HTML", reply_markup=manual_cover_keyboard())
+            await callback.message.edit_text(
+                f"✅ <b>Готово:</b>\n\n{cover_text}", parse_mode="HTML", reply_markup=manual_cover_keyboard()
+            )
         else:
             err = claude_ai.last_error or "Неизвестная ошибка"
             await callback.answer(f"❌ Ошибка генерации: {err}", show_alert=True)
@@ -369,12 +384,12 @@ async def cb_fix_manual_cl(callback: CallbackQuery, state: FSMContext, **kw):
     if "Готово:" in prev_text:
         prev_text = prev_text.split("Готово:", 1)[-1].strip()
     await state.update_data(previous_cover_letter=prev_text)
-    
+
     await callback.message.reply(
         "Напишите текстом, что нужно исправить (например: «напиши короче»):",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="Отмена", callback_data="cancel_manual_fix")
-        ]])
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="cancel_manual_fix")]]
+        ),
     )
 
 
@@ -395,9 +410,9 @@ async def handle_manual_cl_feedback(message: Message, state: FSMContext, **kw):
     company = data.get("company", "")
     original_msg_id = data.get("original_msg_id")
     previous_cover_letter = data.get("previous_cover_letter", "")
-    
+
     await state.set_state(ManualCoverLetter.done)
-    
+
     if not title and not description:
         await message.reply("Нет данных для работы.")
         return
@@ -411,14 +426,14 @@ async def handle_manual_cl_feedback(message: Message, state: FSMContext, **kw):
             company_name=company,
             humanize=settings.humanize_letters,
             feedback=message.text,
-            previous_cover_letter=previous_cover_letter
+            previous_cover_letter=previous_cover_letter,
         )
-        
+
         try:
             await processing_msg.delete()
         except Exception:
             pass
-            
+
         if cover_text and original_msg_id:
             try:
                 await message.bot.edit_message_text(
@@ -426,7 +441,7 @@ async def handle_manual_cl_feedback(message: Message, state: FSMContext, **kw):
                     message_id=original_msg_id,
                     text=f"✅ <b>Готово:</b>\n\n{cover_text}",
                     parse_mode="HTML",
-                    reply_markup=manual_cover_keyboard()
+                    reply_markup=manual_cover_keyboard(),
                 )
             except Exception as edit_err:
                 if "message is not modified" in str(edit_err).lower():
@@ -434,17 +449,18 @@ async def handle_manual_cl_feedback(message: Message, state: FSMContext, **kw):
                 else:
                     await message.reply(f"❌ Ошибка обновления: {str(edit_err)}")
         elif cover_text:
-            msg = await message.answer(f"✅ <b>Готово:</b>\n\n{cover_text}", parse_mode="HTML", reply_markup=manual_cover_keyboard())
+            msg = await message.answer(
+                f"✅ <b>Готово:</b>\n\n{cover_text}", parse_mode="HTML", reply_markup=manual_cover_keyboard()
+            )
             await state.update_data(original_msg_id=msg.message_id)
         else:
             await message.reply("❌ Ошибка генерации.")
     except Exception as e:
         try:
             await processing_msg.delete()
-        except:
+        except Exception:
             pass
         await message.reply(f"❌ Ошибка: {str(e)}")
-
 
 
 @router.message(F.text == "📩 Сообщения")
@@ -452,8 +468,10 @@ async def handle_manual_cl_feedback(message: Message, state: FSMContext, **kw):
 @admin_only
 async def btn_messages(message: Message, **kw):
     import html as _html
+
     await message.answer("🔄 Проверяю приглашения на hh.ru...")
     from app.parsers.hh_oauth import hh_oauth
+
     statuses = await hh_oauth.negotiations_status()
 
     if not statuses:
@@ -490,7 +508,7 @@ async def btn_messages(message: Message, **kw):
     from app.database import async_session
     from app.models.message import RecruiterMessage
     from sqlalchemy import select, desc
-    
+
     habr_lines = []
     try:
         async with async_session() as session:
@@ -501,7 +519,7 @@ async def btn_messages(message: Message, **kw):
                 .limit(10)
             )
             recent_habr = recent_habr.all()
-            
+
             if recent_habr:
                 habr_lines.append("\n🔵 <b>Хабр Карьера (последние сообщения):</b>")
                 for m in recent_habr:
@@ -514,7 +532,13 @@ async def btn_messages(message: Message, **kw):
     text = "\n".join(lines + habr_lines)
     if len(text) > 3900:
         text = text[:3900] + "\n…"
-    await message.answer(text, parse_mode="HTML")
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="💬 Открыть диалоги hh.ru", callback_data="hh_chat_list")]]
+    )
+    await message.answer(text, parse_mode="HTML", reply_markup=markup)
 
 
 def _settings_text(paused: bool, auto: bool, limit: int = 0) -> str:
@@ -628,6 +652,7 @@ async def cmd_balance(message: Message, **kw):
 
 async def _fetch_balance(base_url: str, api_key: str) -> dict | None:
     import httpx
+
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
@@ -668,7 +693,9 @@ def _format_provider(label: str, base_url: str, data: dict | None) -> str:
     dash = _dashboard_for(base_url)
     if not data:
         if dash:
-            return f"<b>{label} — {name}</b>\n  ℹ️ Баланс через API недоступен.\n  🔗 <a href=\"{dash}\">Открыть дашборд</a>"
+            return (
+                f'<b>{label} — {name}</b>\n  ℹ️ Баланс через API недоступен.\n  🔗 <a href="{dash}">Открыть дашборд</a>'
+            )
         return f"<b>{label} — {name}</b>\n  ❌ нет ответа от {base_url}"
     balance = data.get("balance_cents", 0)
     inp = data.get("total_input_tokens", 0)
@@ -743,9 +770,13 @@ async def _send_balance(target):
     if isinstance(target, CallbackQuery):
         if target.message:
             try:
-                await target.message.edit_text(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=reply_kb)
+                await target.message.edit_text(
+                    text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=reply_kb
+                )
             except Exception:
-                await target.message.answer(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=reply_kb)
+                await target.message.answer(
+                    text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=reply_kb
+                )
         else:
             await target.answer(text, parse_mode="HTML")
         await target.answer()
@@ -797,6 +828,7 @@ async def cb_ai_preset(callback: CallbackQuery, **kw):
         try:
             from pathlib import Path
             import json
+
             sf = Path("data/scheduler_state.json")
             st = json.loads(sf.read_text()) if sf.exists() else {}
             st["selected_llm_model"] = settings.llm_model
@@ -822,6 +854,7 @@ async def cb_ai_preset(callback: CallbackQuery, **kw):
         try:
             from pathlib import Path
             import json
+
             sf = Path("data/scheduler_state.json")
             st = json.loads(sf.read_text()) if sf.exists() else {}
             st["selected_llm_model"] = settings.llm_model
@@ -842,8 +875,9 @@ async def cb_ai_test_conn(callback: CallbackQuery, **kw):
     await callback.answer("⏳ Проверяю связь с AI...")
     ok, msg = await claude_ai.test_connection()
     import html as _html
+
     safe_msg = _html.escape(msg)
-    
+
     if ok:
         await callback.message.answer(
             f"✅ <b>Связь с AI успешна!</b>\n\n"
@@ -1008,6 +1042,7 @@ async def cb_set_model(callback: CallbackQuery, **kw):
     try:
         from pathlib import Path
         import json
+
         sf = Path("data/scheduler_state.json")
         st = json.loads(sf.read_text()) if sf.exists() else {}
         st["selected_llm_model"] = model_name
@@ -1020,10 +1055,10 @@ async def cb_set_model(callback: CallbackQuery, **kw):
     await _send_balance(callback)
 
 
-
 # ══════════════════════════════════════════════════════════════
 #  ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ══════════════════════════════════════════════════════════════
+
 
 async def _send_vacancy_page(target, page: int = 0, top_only: bool = False):
     async with async_session() as session:
@@ -1037,11 +1072,7 @@ async def _send_vacancy_page(target, page: int = 0, top_only: bool = False):
         total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
         page = min(page, total_pages - 1)
 
-        query = (
-            select(Vacancy)
-            .options(selectinload(Vacancy.company))
-            .where(base_filter)
-        )
+        query = select(Vacancy).options(selectinload(Vacancy.company)).where(base_filter)
         if top_only:
             query = query.where(Vacancy.ai_score >= 60)
 
@@ -1098,6 +1129,7 @@ async def _send_vacancy_page(target, page: int = 0, top_only: bool = False):
 # ══════════════════════════════════════════════════════════════
 #  CALLBACK-ХЭНДЛЕРЫ
 # ══════════════════════════════════════════════════════════════
+
 
 @router.callback_query(F.data.startswith("page:"))
 @admin_only
@@ -1180,17 +1212,15 @@ async def cb_fix_cl(callback: CallbackQuery, state: FSMContext, **kw):
     prev_text = callback.message.text or ""
     if "Готово:" in prev_text:
         prev_text = prev_text.split("Готово:", 1)[-1].strip()
-        
+
     await state.update_data(
-        vacancy_id=vacancy_id, 
-        original_msg_id=callback.message.message_id,
-        previous_cover_letter=prev_text
+        vacancy_id=vacancy_id, original_msg_id=callback.message.message_id, previous_cover_letter=prev_text
     )
     await callback.message.reply(
         "Напишите текстом, что нужно исправить (например: «напиши короче» или «убери упоминание AWS»):",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="Отмена", callback_data=f"cancel_fix_cl:{vacancy_id}")
-        ]])
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data=f"cancel_fix_cl:{vacancy_id}")]]
+        ),
     )
 
 
@@ -1225,7 +1255,9 @@ async def handle_cl_feedback(message: Message, state: FSMContext, **kw):
     processing_msg = await message.reply("🤖 Генерирую исправленный вариант...")
 
     humanize = _scheduler.humanize_letters if _scheduler else False
-    letter, _, _ = await claude_ai.generate_cover_letter(title, desc, "", humanize=humanize, feedback=message.text, previous_cover_letter=previous_cover_letter)
+    letter, _, _ = await claude_ai.generate_cover_letter(
+        title, desc, "", humanize=humanize, feedback=message.text, previous_cover_letter=previous_cover_letter
+    )
 
     try:
         await processing_msg.delete()
@@ -1244,6 +1276,8 @@ async def handle_cl_feedback(message: Message, state: FSMContext, **kw):
     except Exception as e:
         log.error("edit_cl_failed", error=str(e))
         await message.reply(f"❌ Не удалось обновить сообщение (возможно текст не изменился). Ошибка: {e}")
+
+
 @router.callback_query(F.data.startswith("confirm_apply:"))
 @admin_only
 async def cb_confirm_apply(callback: CallbackQuery, **kw):
@@ -1257,6 +1291,7 @@ async def cb_confirm_apply(callback: CallbackQuery, **kw):
 
     # Check if Playwright is available
     from app.parsers.hh import HHParser
+
     parser = HHParser()
     pw = parser._get_playwright()
     if not pw:
@@ -1305,13 +1340,16 @@ async def cb_confirm_apply(callback: CallbackQuery, **kw):
             if v:
                 v.status = VacancyStatus.APPLIED
                 from app.models.application import Application, ApplicationStatus
-                session.add(Application(
-                    vacancy_id=vacancy_id,
-                    platform=v.platform,
-                    cover_letter=cover_letter,
-                    status=ApplicationStatus.SENT,
-                    attempt_count=1,
-                ))
+
+                session.add(
+                    Application(
+                        vacancy_id=vacancy_id,
+                        platform=v.platform,
+                        cover_letter=cover_letter,
+                        status=ApplicationStatus.SENT,
+                        attempt_count=1,
+                    )
+                )
                 await session.commit()
         await callback.message.answer("✅ Отклик отправлен!")
     else:
@@ -1368,9 +1406,7 @@ async def cb_details(callback: CallbackQuery, **kw):
         company = f"\n🏢 {cname}" if cname else ""
 
     await callback.message.answer(
-        f"<b>{vacancy.title}</b>{company}{salary}{ai_info}\n\n"
-        f"{desc}\n\n"
-        f"🔗 <a href='{vacancy.url}'>Открыть</a>",
+        f"<b>{vacancy.title}</b>{company}{salary}{ai_info}\n\n" f"{desc}\n\n" f"🔗 <a href='{vacancy.url}'>Открыть</a>",
         parse_mode="HTML",
         reply_markup=vacancy_keyboard(vacancy_id),
         disable_web_page_preview=True,
@@ -1458,16 +1494,16 @@ async def cb_toggle_plat(callback: CallbackQuery, **kw):
         await callback.answer("Scheduler не найден")
         return
     plat = callback.data.split(":")[1]
-    
+
     if plat in _scheduler.manual_paused_platforms:
         _scheduler.manual_paused_platforms.remove(plat)
         await callback.answer(f"▶️ Платформа {plat} включена")
     else:
         _scheduler.manual_paused_platforms.add(plat)
         await callback.answer(f"⏸ Платформа {plat} отключена")
-        
+
     _scheduler._save_state()
-    
+
     limit = _scheduler.max_applies_per_day_hh if _scheduler else 0
     plats = _scheduler.manual_paused_platforms
     await callback.message.edit_reply_markup(
@@ -1497,6 +1533,7 @@ async def cb_toggle_auto(callback: CallbackQuery, **kw):
 async def cb_force_search(callback: CallbackQuery, **kw):
     await callback.answer("🔄 Запускаю поиск...")
     from app.workers.vacancy_worker import run_vacancy_search
+
     count = await run_vacancy_search()
     await callback.message.answer(f"🔍 Найдено <b>{count}</b> новых вакансий", parse_mode="HTML")
 
@@ -1512,11 +1549,10 @@ async def cb_show_balance(callback: CallbackQuery, **kw):
 async def cb_bump_resume(callback: CallbackQuery, **kw):
     await callback.answer("⬆️ Поднимаю резюме...")
     from app.parsers.hh_oauth import hh_oauth
+
     res = await hh_oauth.bump_resumes()
     if res.get("error") == "no_oauth_token":
-        await callback.message.answer(
-            "❌ Нет токена hh API. Сначала войди: /login."
-        )
+        await callback.message.answer("❌ Нет токена hh API. Сначала войди: /login.")
         return
     if res.get("error"):
         await callback.message.answer(f"❌ Не получилось поднять резюме: {res['error']}")
@@ -1536,9 +1572,13 @@ async def cb_bump_resume(callback: CallbackQuery, **kw):
 
 
 _BEHAVIOR_DEFAULTS = {
-    "auto_apply": False, "pass_tests": True, "ai_cover_letters": False,
-    "humanize_letters": False, "notify_messages": True, 
-    "thank_rejections": True, "bump_resume": True,
+    "auto_apply": False,
+    "pass_tests": True,
+    "ai_cover_letters": False,
+    "humanize_letters": False,
+    "notify_messages": True,
+    "thank_rejections": True,
+    "bump_resume": True,
 }
 
 
@@ -1576,7 +1616,6 @@ async def cb_bflag(callback: CallbackQuery, **kw):
         await callback.message.edit_reply_markup(reply_markup=behavior_keyboard(_scheduler.get_flags()))
     except Exception:
         pass
-
 
 
 @router.callback_query(F.data == "clear_neg")
@@ -1621,9 +1660,7 @@ async def cb_clear_neg_run(callback: CallbackQuery, **kw):
         return
 
     if res.get("error") == "no_oauth_token":
-        await callback.message.answer(
-            "❌ Нет токена hh API. Сначала войди через OAuth (тест-отклик или /login)."
-        )
+        await callback.message.answer("❌ Нет токена hh API. Сначала войди через OAuth (тест-отклик или /login).")
         return
 
     verb = "Под удаление попадёт" if mode == "dry" else "Убрано"
@@ -1645,11 +1682,13 @@ async def cb_clear_neg_run(callback: CallbackQuery, **kw):
 async def cb_thank_rejections(callback: CallbackQuery, **kw):
     await callback.answer("💬 Отправляю благодарности...")
     from app.workers.message_worker import process_rejection_thanks
+
     count = await process_rejection_thanks(max_count=3)
     await callback.message.answer(f"Отправлено сообщений: {count}")
     # Always send diagnostic screenshots so we can see what hh.ru showed
     from pathlib import Path
     from aiogram.types import FSInputFile
+
     for name in (
         "debug_thanks_step1_home.png",
         "debug_thanks_step2_no_activator.png",
@@ -1681,6 +1720,7 @@ async def cb_cancel_apply(callback: CallbackQuery, **kw):
 #  PLAYWRIGHT / HH.RU LOGIN
 # ══════════════════════════════════════════════════════════════
 
+
 class LoginSG(StatesGroup):
     phone = State()
     code = State()
@@ -1692,15 +1732,11 @@ async def cmd_login(message: Message, state: FSMContext, **kw):
     """Вход на hh.ru по одноразовому коду (телефон → код)."""
     await state.clear()
     default = settings.hh_login or ""
-    hint = (
-        f"\n\nЛогин из настроек: <code>{default}</code> — можешь прислать его же."
-        if default else ""
-    )
+    hint = f"\n\nЛогин из настроек: <code>{default}</code> — можешь прислать его же." if default else ""
     await message.answer(
         "🔐 <b>Вход на hh.ru по коду</b>\n\n"
         "Пришли номер телефона, привязанный к hh (например <code>+79991234567</code>). "
-        "hh отправит код, его потом введёшь здесь." + hint
-        + "\n\nОтмена: /cancel",
+        "hh отправит код, его потом введёшь здесь." + hint + "\n\nОтмена: /cancel",
         parse_mode="HTML",
     )
     await state.set_state(LoginSG.phone)
@@ -1710,6 +1746,7 @@ async def cmd_login(message: Message, state: FSMContext, **kw):
 @admin_only
 async def cmd_cancel(message: Message, state: FSMContext, **kw):
     from app.parsers.hh_login import drop_session
+
     await drop_session(message.chat.id)
     await state.clear()
     await message.answer("Отменено.")
@@ -1724,6 +1761,7 @@ async def login_phone(message: Message, state: FSMContext, **kw):
         return
     await message.answer("⏳ Открываю вход на hh и запрашиваю код...")
     from app.parsers.hh_login import OTPLoginSession, set_session
+
     sess = OTPLoginSession()
     res = await sess.start(phone)
     if res.get("status") == "code_sent":
@@ -1733,6 +1771,7 @@ async def login_phone(message: Message, state: FSMContext, **kw):
     elif res.get("status") == "captcha":
         from pathlib import Path
         from aiogram.types import FSInputFile
+
         p = Path("data/hh_login_captcha.png")
         await sess.cancel()
         await state.clear()
@@ -1746,9 +1785,7 @@ async def login_phone(message: Message, state: FSMContext, **kw):
     else:
         await sess.cancel()
         await state.clear()
-        await message.answer(
-            f"❌ Не удалось начать вход: {res.get('error')}\nПопробуй /login ещё раз."
-        )
+        await message.answer(f"❌ Не удалось начать вход: {res.get('error')}\nПопробуй /login ещё раз.")
 
 
 @router.message(LoginSG.code)
@@ -1756,6 +1793,7 @@ async def login_phone(message: Message, state: FSMContext, **kw):
 async def login_code(message: Message, state: FSMContext, **kw):
     code = (message.text or "").strip()
     from app.parsers.hh_login import get_session, drop_session
+
     sess = get_session(message.chat.id)
     if not sess:
         await state.clear()
@@ -1771,9 +1809,7 @@ async def login_code(message: Message, state: FSMContext, **kw):
             "Теперь работают отклики, прохождение тестов и поднятие резюме."
         )
     else:
-        await message.answer(
-            f"❌ Код не подошёл: {res.get('error')}\nПопробуй /login заново."
-        )
+        await message.answer(f"❌ Код не подошёл: {res.get('error')}\nПопробуй /login заново.")
 
 
 @router.message(Command("test_apply"))
@@ -1811,7 +1847,6 @@ async def cmd_test_apply(message: Message, **kw):
         return
 
     from app.parsers.hh_oauth import hh_oauth
-    from app.parsers.hh_api import hh_api_client
     from app.ai.claude import claude_ai
     import asyncio as _async
     import re as _re
@@ -1820,6 +1855,7 @@ async def cmd_test_apply(message: Message, **kw):
 
     # Pre-sync applied list so we don't re-try the same ones
     from app.workers.apply_worker import sync_applied_from_hh
+
     marked = await sync_applied_from_hh()
     if marked:
         await message.answer(f"🔄 Помечено уже-откликнутых: {marked}. Беру новые.")
@@ -1862,6 +1898,7 @@ async def cmd_test_apply(message: Message, **kw):
             except Exception:
                 ai_letter = letter
             from app.parsers.hh import HHParser
+
             pw_parser = HHParser()
             try:
                 await _async.wait_for(pw_parser.login(), timeout=60)
@@ -1888,6 +1925,7 @@ async def cmd_test_apply(message: Message, **kw):
         if info and info.get("path") == "playwright":
             from pathlib import Path as _Path
             from aiogram.types import FSInputFile as _FSI
+
             for stage in ("before", "after"):
                 p = _Path(f"data/test_apply_{tag}_{stage}.png")
                 if p.exists():
@@ -1903,12 +1941,15 @@ async def cmd_test_apply(message: Message, **kw):
                 vv = await session.get(Vacancy, v.id)
                 if vv:
                     vv.status = VacancyStatus.APPLIED
-                    session.add(Application(
-                        vacancy_id=v.id, platform="hh",
-                        cover_letter=letter,
-                        status=ApplicationStatus.SENT,
-                        attempt_count=1,
-                    ))
+                    session.add(
+                        Application(
+                            vacancy_id=v.id,
+                            platform="hh",
+                            cover_letter=letter,
+                            status=ApplicationStatus.SENT,
+                            attempt_count=1,
+                        )
+                    )
                     await session.commit()
         elif res == "already":
             stats["already"] += 1
@@ -1920,12 +1961,15 @@ async def cmd_test_apply(message: Message, **kw):
         else:
             stats["failed"] += 1
             async with async_session() as session:
-                session.add(Application(
-                    vacancy_id=v.id, platform="hh",
-                    cover_letter=letter,
-                    status=ApplicationStatus.FAILED,
-                    attempt_count=1,
-                ))
+                session.add(
+                    Application(
+                        vacancy_id=v.id,
+                        platform="hh",
+                        cover_letter=letter,
+                        status=ApplicationStatus.FAILED,
+                        attempt_count=1,
+                    )
+                )
                 await session.commit()
 
         if i < len(vacancies):
@@ -1945,6 +1989,7 @@ async def cmd_test_apply(message: Message, **kw):
 async def cmd_negotiations(message: Message, **kw):
     """Проверить статусы откликов на hh.ru."""
     from app.parsers.hh import HHParser
+
     parser = HHParser()
     pw = parser._get_playwright()
 
@@ -1983,6 +2028,7 @@ async def cmd_negotiations(message: Message, **kw):
 
     await message.answer("\n".join(text_parts), parse_mode="HTML")
 
+
 @router.callback_query(F.data == "limits_menu")
 @admin_only
 async def cb_limits_menu(callback: CallbackQuery, **kw):
@@ -1996,6 +2042,7 @@ async def cb_limits_menu(callback: CallbackQuery, **kw):
         reply_markup=limits_keyboard(limit),
     )
 
+
 @router.callback_query(F.data.startswith("set_limit:"))
 @admin_only
 async def cb_set_limit(callback: CallbackQuery, state: FSMContext, **kw):
@@ -2003,7 +2050,7 @@ async def cb_set_limit(callback: CallbackQuery, state: FSMContext, **kw):
         await callback.answer("Scheduler не найден")
         return
     action = callback.data.split(":")[1]
-    
+
     if action == "custom":
         await state.set_state(SettingsSG.waiting_for_custom_limit)
         await callback.answer()
@@ -2011,20 +2058,20 @@ async def cb_set_limit(callback: CallbackQuery, state: FSMContext, **kw):
             "✏️ <b>Ввод лимита откликов</b>\n\n"
             "Пришлите желаемое количество откликов в день (числом).\n"
             "Отправьте /cancel для отмены.",
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
         return
 
     current = _scheduler.max_applies_per_day_hh
     new_limit = current
-    
+
     if action == "-5":
         new_limit = max(1, current - 5)
     elif action == "+5":
         new_limit = current + 5
     elif action.endswith("_abs"):
         new_limit = int(action.replace("_abs", ""))
-        
+
     if new_limit != current:
         _scheduler.set_max_applies(new_limit)
         await callback.answer(f"Лимит изменён: {new_limit}")
@@ -2038,6 +2085,7 @@ async def cb_set_limit(callback: CallbackQuery, state: FSMContext, **kw):
     else:
         await callback.answer("Уже установлено")
 
+
 @router.callback_query(F.data == "settings_back")
 @admin_only
 async def cb_settings_back(callback: CallbackQuery, **kw):
@@ -2046,10 +2094,13 @@ async def cb_settings_back(callback: CallbackQuery, **kw):
     await callback.message.edit_text(
         _settings_text(_scheduler.is_paused, _scheduler.auto_apply, limit),
         parse_mode="HTML",
-        reply_markup=settings_keyboard(_scheduler.is_paused, _scheduler.auto_apply, limit, _scheduler.manual_paused_platforms if _scheduler else set()),
+        reply_markup=settings_keyboard(
+            _scheduler.is_paused,
+            _scheduler.auto_apply,
+            limit,
+            _scheduler.manual_paused_platforms if _scheduler else set(),
+        ),
     )
-
-
 
 
 @router.message(SettingsSG.waiting_for_custom_limit)
@@ -2059,11 +2110,11 @@ async def msg_custom_limit(message: Message, state: FSMContext, **kw):
     if not text.isdigit() or int(text) < 1:
         await message.answer("❌ Пожалуйста, введите корректное положительное число или /cancel.")
         return
-        
+
     new_limit = int(text)
     if _scheduler:
         _scheduler.set_max_applies(new_limit)
-        
+
     await state.clear()
     await message.answer(f"✅ Лимит успешно установлен на <b>{new_limit}</b> в день.", parse_mode="HTML")
     # Show settings menu again
@@ -2071,7 +2122,9 @@ async def msg_custom_limit(message: Message, state: FSMContext, **kw):
         await message.answer(
             _settings_text(_scheduler.is_paused, _scheduler.auto_apply, new_limit),
             parse_mode="HTML",
-            reply_markup=settings_keyboard(_scheduler.is_paused, _scheduler.auto_apply, new_limit, _scheduler.manual_paused_platforms),
+            reply_markup=settings_keyboard(
+                _scheduler.is_paused, _scheduler.auto_apply, new_limit, _scheduler.manual_paused_platforms
+            ),
         )
 
 
@@ -2080,11 +2133,13 @@ async def msg_custom_limit(message: Message, state: FSMContext, **kw):
 async def cb_force_sync_sheets(callback: CallbackQuery, **kw):
     await callback.message.answer("🔄 Начинаю проверку свежих статусов откликов и синхронизацию с таблицей...")
     await callback.answer()
-    
+
     if _scheduler:
         try:
             count = await _scheduler._job_sync_sheets(force=True)
-            await callback.message.answer(f"✅ Синхронизация статусов с Google Таблицей завершена!\nОбновлено строк: {count}")
+            await callback.message.answer(
+                f"✅ Синхронизация статусов с Google Таблицей завершена!\nОбновлено строк: {count}"
+            )
         except Exception as e:
             await callback.message.answer(f"❌ Произошла ошибка при синхронизации: {e}")
     else:
@@ -2095,14 +2150,19 @@ async def cb_force_sync_sheets(callback: CallbackQuery, **kw):
 #  СКРИНЕР ВАКАНСИЙ (MAX / GIGARECRUITER)
 # ══════════════════════════════════════════════════════════════
 
+
 @router.callback_query(F.data == "screener_menu")
 @admin_only
 async def cb_screener_menu(callback: CallbackQuery, **kw):
     await callback.answer()
     is_running = max_screener._page is not None
     status_text = "🟢 Активен (автоотслеживание чата)" if is_running else "⚪ Не запущен"
-    session_text = "✅ Найдена (max_state.json)" if max_screener.is_session_available() else "❌ Отсутствует (нужен login_max_linux.sh)"
-    
+    session_text = (
+        "✅ Найдена (max_state.json)"
+        if max_screener.is_session_available()
+        else "❌ Отсутствует (нужен login_max_linux.sh)"
+    )
+
     text = (
         f"💬 <b>Ассистент скринеров вакансий (MAX / ГигаРекрутер)</b>\n\n"
         f"Статус службы: <b>{status_text}</b>\n"
@@ -2212,7 +2272,9 @@ async def cb_screener_toggle(callback: CallbackQuery, **kw):
         return
 
     await callback.answer("🚀 Запуск браузера...")
-    await callback.message.edit_text("⏳ <i>Подключение к веб-мессенджеру MAX и открытие чата со скринером...</i>", parse_mode="HTML")
+    await callback.message.edit_text(
+        "⏳ <i>Подключение к веб-мессенджеру MAX и открытие чата со скринером...</i>", parse_mode="HTML"
+    )
     ok = await max_screener.start(headless=True)
     if not ok:
         await callback.message.edit_text(
@@ -2270,9 +2332,13 @@ async def cb_screener_poll(callback: CallbackQuery, **kw):
             f"Отправить этот ответ в чат рекрутеру или отредактировать?"
         )
         try:
-            await status_msg.edit_text(card_text, parse_mode="HTML", reply_markup=screener_card_keyboard(has_pending=True))
+            await status_msg.edit_text(
+                card_text, parse_mode="HTML", reply_markup=screener_card_keyboard(has_pending=True)
+            )
         except Exception:
-            await callback.message.answer(card_text, parse_mode="HTML", reply_markup=screener_card_keyboard(has_pending=True))
+            await callback.message.answer(
+                card_text, parse_mode="HTML", reply_markup=screener_card_keyboard(has_pending=True)
+            )
     elif q:
         await callback.answer("У вас уже есть ожидающий вопрос выше.")
     else:
@@ -2323,7 +2389,9 @@ async def cb_screener_regen(callback: CallbackQuery, **kw):
         f"<blockquote>{answer}</blockquote>\n\n"
         f"Отправить этот ответ в чат рекрутеру или отредактировать?"
     )
-    await callback.message.edit_text(card_text, parse_mode="HTML", reply_markup=screener_card_keyboard(has_pending=True))
+    await callback.message.edit_text(
+        card_text, parse_mode="HTML", reply_markup=screener_card_keyboard(has_pending=True)
+    )
 
 
 @router.callback_query(F.data == "screener_edit")
@@ -2357,7 +2425,11 @@ async def msg_screener_custom_answer(message: Message, state: FSMContext, **kw):
         _screener_state["suggested_answer"] = ""
         _screener_state["waiting_for_user_action"] = False
     else:
-        await message.answer("❌ Ошибка при отправке через браузер. Проверьте, открыта ли страница.", reply_markup=screener_card_keyboard(has_pending=True))
+        await message.answer(
+            "❌ Ошибка при отправке через браузер. Проверьте, открыта ли страница.",
+            reply_markup=screener_card_keyboard(has_pending=True),
+        )
+
 
 @router.callback_query(F.data == "screener_custom_idea")
 @admin_only
@@ -2368,27 +2440,33 @@ async def cb_screener_custom_idea(callback: CallbackQuery, state: FSMContext, **
         "💡 <b>Ваша идея ответа:</b>\n\n"
         "Напишите коротко, что вы хотите передать рекрутеру (например: <i>«согласен на пятницу 15:00»</i> или <i>«нет, не работал с Docker»</i>).\n"
         "Нейросеть сформулирует из этого готовый деловой ответ от вашего лица.",
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
+
 
 @router.message(MaxScreenerSG.waiting_custom_idea)
 @admin_only
 async def msg_screener_custom_idea(message: Message, state: FSMContext, **kw):
     user_idea = message.text.strip()
     await state.clear()
-    status_msg = await message.answer("⏳ <i>Генерирую очеловеченный ответ на основе вашей идеи...</i>", parse_mode="HTML")
-    
+    status_msg = await message.answer(
+        "⏳ <i>Генерирую очеловеченный ответ на основе вашей идеи...</i>", parse_mode="HTML"
+    )
+
     question = _screener_state.get("question", "")
     final_answer = await claude_ai.generate_custom_idea_answer(question=question, user_idea=user_idea)
-    
+
     _screener_state["suggested_answer"] = final_answer
-    card_text = _build_screener_card_text(_screener_state)
-    
-    await status_msg.edit_text(
-        card_text,
-        parse_mode="HTML",
-        reply_markup=screener_card_keyboard(has_pending=True)
+    card_text = (
+        f"🎯 <b>Вопрос от скринера вакансий:</b>\n"
+        f"<i>«{question}»</i>\n\n"
+        f"🤖 <b>Ваш вариант ответа (сформулирован AI):</b>\n"
+        f"<blockquote>{final_answer}</blockquote>\n\n"
+        f"Отправить этот ответ в чат рекрутеру или отредактировать?"
     )
+
+    await status_msg.edit_text(card_text, parse_mode="HTML", reply_markup=screener_card_keyboard(has_pending=True))
+
 
 @router.callback_query(F.data == "screener_skip")
 @admin_only
@@ -2397,7 +2475,11 @@ async def cb_screener_skip(callback: CallbackQuery, **kw):
     _screener_state["suggested_answer"] = ""
     _screener_state["waiting_for_user_action"] = False
     await callback.answer("Вопрос пропущен")
-    await callback.message.edit_text("⏭ <b>Вопрос пропущен.</b> Ожидаем новые сообщения...", parse_mode="HTML", reply_markup=screener_card_keyboard(has_pending=False))
+    await callback.message.edit_text(
+        "⏭ <b>Вопрос пропущен.</b> Ожидаем новые сообщения...",
+        parse_mode="HTML",
+        reply_markup=screener_card_keyboard(has_pending=False),
+    )
 
 
 @router.callback_query(F.data == "screener_stop")
@@ -2413,15 +2495,19 @@ async def cb_screener_stop(callback: CallbackQuery, **kw):
     _screener_state["question"] = ""
     _screener_state["suggested_answer"] = ""
     await callback.answer("🛑 Сессия закрыта")
-    await callback.message.edit_text("🛑 <b>Сессия скринера закрыта.</b> Браузер и автоотслеживание остановлены.", parse_mode="HTML")
+    await callback.message.edit_text(
+        "🛑 <b>Сессия скринера закрыта.</b> Браузер и автоотслеживание остановлены.", parse_mode="HTML"
+    )
 
 
 # ══════════════════════════════════════════════════════════════
 #  ИНСТРУМЕНТ ОТВЕТОВ В ЧАТАХ HEADHUNTER (HH.RU/CHAT)
 # ══════════════════════════════════════════════════════════════
 
+
 def _build_hh_card_text(state: dict) -> str:
     import html as _html
+
     company = _html.escape(state.get("company") or "Работодатель")
     vacancy = _html.escape(state.get("vacancy") or "Вакансия")
     q = _html.escape(state.get("question") or "")
@@ -2464,7 +2550,7 @@ async def _hh_chat_background_monitor(bot):
                 log.info("hh_chat_monitor_tick_scanning")
                 chats = await hh_chat_parser.get_unread_or_active_chats()
                 unread_chats = [c for c in chats if c.get("has_unread") and not c.get("is_rejection")]
-                
+
                 # Если с бейджем непрочитанных чатов нет, проверяем первые 3 активных чата
                 # (на случай, если пользователь уже открывал браузер или hh.ru снял бейдж)
                 candidate_chats = unread_chats if unread_chats else [c for c in chats[:3] if not c.get("is_rejection")]
@@ -2474,7 +2560,7 @@ async def _hh_chat_background_monitor(bot):
                     chat_id = target_chat.get("chat_id")
                     if not chat_id:
                         continue
-                    
+
                     log.info("hh_chat_monitor_inspecting", chat_id=chat_id, company=target_chat.get("company"))
                     details = await hh_chat_parser.inspect_chat(chat_id)
                     if not details:
@@ -2523,6 +2609,7 @@ async def _hh_chat_background_monitor(bot):
                     if tg_chat_id:
                         try:
                             import html as _html
+
                             status_msg = await bot.send_message(
                                 chat_id=int(tg_chat_id),
                                 text=(
@@ -2601,7 +2688,11 @@ async def _hh_chat_background_monitor(bot):
 async def cb_hh_chat_menu(callback: CallbackQuery, **kw):
     is_running = _hh_chat_state.get("is_monitoring", False)
     status_text = "🟢 Активно (сканирование каждые 25 сек)" if is_running else "⏹ Остановлено"
-    session_text = "✅ Авторизован (hh_state.json)" if hh_chat_parser.is_session_available() else "❌ Нет сессии (войдите через браузер)"
+    session_text = (
+        "✅ Авторизован (hh_state.json)"
+        if hh_chat_parser.is_session_available()
+        else "❌ Нет сессии (войдите через браузер)"
+    )
 
     text = (
         f"💬 <b>Ассистент чатов HeadHunter (hh.ru/chat) [БЕТА]</b>\n"
@@ -2673,7 +2764,9 @@ async def cb_hh_chat_list(callback: CallbackQuery, **kw):
 
     log.info("hh_chat_list_requested", user_id=callback.from_user.id, page=page)
     await callback.answer("Загружаю список чатов...")
-    status_msg = await callback.message.edit_text("⏳ <i>Получаю список последних чатов с hh.ru...</i>", parse_mode="HTML")
+    status_msg = await callback.message.edit_text(
+        "⏳ <i>Получаю список последних чатов с hh.ru...</i>", parse_mode="HTML"
+    )
 
     if not hh_chat_parser.is_session_available():
         await status_msg.edit_text("❌ Нет сохраненной сессии hh.ru. Сначала пройдите авторизацию.")
@@ -2683,7 +2776,7 @@ async def cb_hh_chat_list(callback: CallbackQuery, **kw):
     if not chats:
         await status_msg.edit_text(
             "📭 У вас пока нет активных чатов или произошла ошибка при загрузке.",
-            reply_markup=hh_chat_menu_keyboard(_hh_chat_state.get("is_monitoring", False))
+            reply_markup=hh_chat_menu_keyboard(_hh_chat_state.get("is_monitoring", False)),
         )
         return
 
@@ -2692,34 +2785,34 @@ async def cb_hh_chat_list(callback: CallbackQuery, **kw):
     if not active_chats:
         await status_msg.edit_text(
             "📭 У вас нет активных диалогов (везде найден отказ).",
-            reply_markup=hh_chat_menu_keyboard(_hh_chat_state.get("is_monitoring", False))
+            reply_markup=hh_chat_menu_keyboard(_hh_chat_state.get("is_monitoring", False)),
         )
         return
 
     await status_msg.edit_text(
-        "🗂 <b>Выберите диалог для ответа:</b>\n\n"
-        f"<i>Страница {page + 1}. 🔴 означает наличие новых сообщений.</i>",
+        "🗂 <b>Выберите диалог для ответа:</b>\n\n" f"<i>Страница {page + 1}. 🔴 означает наличие новых сообщений.</i>",
         parse_mode="HTML",
-        reply_markup=hh_chat_list_keyboard(active_chats, page=page)
+        reply_markup=hh_chat_list_keyboard(active_chats, page=page),
     )
+
 
 @router.callback_query(F.data.startswith("hh_sel_chat:"))
 @admin_only
 async def cb_hh_select_chat(callback: CallbackQuery, **kw):
     chat_id = callback.data.split(":")[1]
     log.info("hh_chat_selected_manually", chat_id=chat_id)
-    
+
     # Сбрасываем флаги ожидания
     _hh_chat_state["waiting_for_user_action"] = False
-    
+
     await callback.answer("Открываю диалог...")
     status_msg = await callback.message.edit_text("⏳ <i>Читаю историю сообщений в чате...</i>", parse_mode="HTML")
-    
+
     details = await hh_chat_parser.inspect_chat(chat_id)
     if not details:
         await status_msg.edit_text(
             f"❌ Не удалось открыть чат {chat_id}.",
-            reply_markup=hh_chat_menu_keyboard(_hh_chat_state.get("is_monitoring", False))
+            reply_markup=hh_chat_menu_keyboard(_hh_chat_state.get("is_monitoring", False)),
         )
         return
 
@@ -2730,17 +2823,18 @@ async def cb_hh_select_chat(callback: CallbackQuery, **kw):
     _hh_chat_state["vacancy"] = details.get("vacancy", "")
     _hh_chat_state["question"] = question
     _hh_chat_state["options"] = details.get("options", [])
-    
+
     import html as _html
+
     await status_msg.edit_text(
         f"💬 <b>Выбран чат HeadHunter</b>\n\n"
         f"🏢 <b>Компания:</b> {_html.escape(_hh_chat_state['company'] or '—')}\n"
         f"📋 <b>Вакансия:</b> {_html.escape(_hh_chat_state['vacancy'] or '—')}\n"
         f"❓ <i>«{_html.escape(question)}»</i>\n\n"
         f"⏳ <i>Нейросеть готовит ответ на основе резюме...</i>",
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
-    
+
     answer, rec_opt, _, _ = await claude_ai.generate_hh_answer(
         question=question,
         options=_hh_chat_state["options"],
@@ -2748,7 +2842,7 @@ async def cb_hh_select_chat(callback: CallbackQuery, **kw):
         company_name=_hh_chat_state["company"],
         humanize=True,
     )
-    
+
     _hh_chat_state["suggested_answer"] = answer
     _hh_chat_state["recommended_option"] = rec_opt
     card_text = _build_hh_card_text(_hh_chat_state)
@@ -2757,12 +2851,9 @@ async def cb_hh_select_chat(callback: CallbackQuery, **kw):
         recommended_option=rec_opt,
         has_pending=True,
     )
-    
-    await status_msg.edit_text(
-        card_text,
-        parse_mode="HTML",
-        reply_markup=kb
-    )
+
+    await status_msg.edit_text(card_text, parse_mode="HTML", reply_markup=kb)
+
 
 @router.callback_query(F.data == "hh_poll")
 @admin_only
@@ -2797,7 +2888,13 @@ async def cb_hh_poll(callback: CallbackQuery, **kw):
             continue
         log.info("hh_chat_manual_poll_inspecting_unread", chat_id=cid, company=c.get("company"))
         details = await hh_chat_parser.inspect_chat(cid)
-        if details and not details.get("is_rejection") and not details.get("is_closed") and not details.get("is_last_from_me") and details.get("last_incoming_text"):
+        if (
+            details
+            and not details.get("is_rejection")
+            and not details.get("is_closed")
+            and not details.get("is_last_from_me")
+            and details.get("last_incoming_text")
+        ):
             target_chat = c
             target_details = details
             break
@@ -2812,14 +2909,22 @@ async def cb_hh_poll(callback: CallbackQuery, **kw):
             if cid:
                 log.info("hh_chat_manual_poll_inspecting_recent", chat_id=cid, company=c.get("company"))
                 details = await hh_chat_parser.inspect_chat(cid)
-                if details and not details.get("is_rejection") and not details.get("is_closed") and not details.get("is_last_from_me") and details.get("last_incoming_text"):
+                if (
+                    details
+                    and not details.get("is_rejection")
+                    and not details.get("is_closed")
+                    and not details.get("is_last_from_me")
+                    and details.get("last_incoming_text")
+                ):
                     target_chat = c
                     target_details = details
                     break
 
     if not target_chat or not target_details:
         log.info("hh_chat_manual_poll_no_active_questions_found")
-        await status_msg.edit_text("✅ Все активные чаты проверены. Ожидающих вопросов нет (отказы и закрытые диалоги пропущены).")
+        await status_msg.edit_text(
+            "✅ Все активные чаты проверены. Ожидающих вопросов нет (отказы и закрытые диалоги пропущены)."
+        )
         return
 
     chat_id = target_chat["chat_id"]
@@ -2831,6 +2936,7 @@ async def cb_hh_poll(callback: CallbackQuery, **kw):
         return
 
     import html as _html
+
     company = details.get("company") or target_chat.get("company", "") or target_chat.get("last_message", "")
     vacancy = details.get("vacancy") or target_chat.get("title", "")
     options = details.get("options", [])
@@ -2901,6 +3007,7 @@ async def cb_hh_opt(callback: CallbackQuery, **kw):
 
     log.info("hh_chat_user_selected_option", chat_id=chat_id, option=selected_opt)
     import html as _html
+
     await callback.answer(f"Выбран: {selected_opt[:30]}...")
     await callback.message.edit_text(
         f"⏳ <i>Отправляю вариант «{_html.escape(selected_opt)}» в чат HeadHunter...</i>",
@@ -2946,6 +3053,7 @@ async def cb_hh_send_ai(callback: CallbackQuery, **kw):
 
     log.info("hh_chat_user_sent_ai_button", chat_id=chat_id, answer_preview=answer[:60])
     import html as _html
+
     await callback.answer("📨 Отправляю ответ в чат hh.ru...")
     await callback.message.edit_text(
         "⏳ <i>Ввожу текст ответа в диалог на HeadHunter...</i>",
@@ -3005,6 +3113,7 @@ async def msg_hh_custom_answer(message: Message, state: FSMContext, **kw):
 
     log.info("hh_chat_user_sent_custom_text", chat_id=chat_id, text_len=len(custom_text), preview=custom_text[:60])
     import html as _html
+
     await message.answer("📨 <i>Отправляю ваш вариант текста в чат hh.ru...</i>", parse_mode="HTML")
     ok = await hh_chat_parser.send_text_message(chat_id, custom_text)
     if ok:
@@ -3040,33 +3149,33 @@ async def cb_hh_custom_idea(callback: CallbackQuery, state: FSMContext, **kw):
         "💡 <b>Ваша идея ответа:</b>\n\n"
         "Напишите коротко, что вы хотите передать рекрутеру (например: <i>«согласен на пятницу 15:00»</i>).\n"
         "Нейросеть сформулирует из этого готовый деловой ответ от вашего лица.",
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
+
 
 @router.message(HhChatSG.waiting_custom_idea)
 @admin_only
 async def msg_hh_custom_idea(message: Message, state: FSMContext, **kw):
     user_idea = message.text.strip()
     await state.clear()
-    status_msg = await message.answer("⏳ <i>Генерирую очеловеченный ответ на основе вашей идеи...</i>", parse_mode="HTML")
-    
+    status_msg = await message.answer(
+        "⏳ <i>Генерирую очеловеченный ответ на основе вашей идеи...</i>", parse_mode="HTML"
+    )
+
     question = _hh_chat_state.get("question", "")
     final_answer = await claude_ai.generate_custom_idea_answer(question=question, user_idea=user_idea)
-    
+
     _hh_chat_state["suggested_answer"] = final_answer
     card_text = _build_hh_card_text(_hh_chat_state)
-    
+
     kb = hh_chat_card_keyboard(
         options=_hh_chat_state.get("options"),
         recommended_option=_hh_chat_state.get("recommended_option"),
         has_pending=True,
     )
-    
-    await status_msg.edit_text(
-        card_text,
-        parse_mode="HTML",
-        reply_markup=kb
-    )
+
+    await status_msg.edit_text(card_text, parse_mode="HTML", reply_markup=kb)
+
 
 @router.callback_query(F.data == "hh_regen")
 @admin_only
@@ -3107,7 +3216,11 @@ async def cb_hh_skip(callback: CallbackQuery, **kw):
     _hh_chat_state["waiting_for_user_action"] = False
     _hh_chat_state["options"] = []
     await callback.answer("Вопрос пропущен")
-    await callback.message.edit_text("⏭ <b>Вопрос пропущен.</b> Ожидаем новые сообщения...", parse_mode="HTML", reply_markup=hh_chat_card_keyboard(options=None, has_pending=False))
+    await callback.message.edit_text(
+        "⏭ <b>Вопрос пропущен.</b> Ожидаем новые сообщения...",
+        parse_mode="HTML",
+        reply_markup=hh_chat_card_keyboard(options=None, has_pending=False),
+    )
 
 
 @router.callback_query(F.data == "hh_stop")
@@ -3150,6 +3263,7 @@ async def cb_captcha_skip(callback: CallbackQuery, state: FSMContext, **kw):
     await state.clear()
     try:
         from app.parsers.hh_playwright import hh_playwright
+
         if hh_playwright:
             hh_playwright.resolve_captcha("")
     except ImportError:
@@ -3171,12 +3285,12 @@ async def captcha_text_received(message: Message, state: FSMContext, **kw):
         return
     try:
         from app.parsers.hh_playwright import hh_playwright
+
         if hh_playwright:
             hh_playwright.resolve_captcha(text)
     except ImportError:
         pass
     await message.reply(
-        f"✅ Отправлено: <code>{text}</code>\n"
-        "Ожидаем результат...",
+        f"✅ Отправлено: <code>{text}</code>\n" "Ожидаем результат...",
         parse_mode="HTML",
     )
