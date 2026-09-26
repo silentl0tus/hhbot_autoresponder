@@ -94,19 +94,17 @@ class MaxScreenerParser:
             ]
 
             latest_text = ""
-            for selector in selectors:
-                elements = await self._page.query_selector_all(selector)
-                if elements:
-                    # Идем с конца в поисках последнего непустого сообщения
-                    for el in reversed(elements):
-                        t = (await el.inner_text()).strip()
-                        if t and len(t) > 3:
-                            # Проверяем, что это не наш собственный только что отправленный ответ
-                            if self.last_sent_text and (t == self.last_sent_text or t in self.last_sent_text or self.last_sent_text in t):
-                                continue
-                            latest_text = t
-                            break
-                    if latest_text:
+            combined_selector = ", ".join(selectors)
+            elements = await self._page.query_selector_all(combined_selector)
+            if elements:
+                # Идем с конца в поисках последнего непустого сообщения
+                for el in reversed(elements):
+                    t = (await el.inner_text()).strip()
+                    if t and len(t) > 3:
+                        # Проверяем, что это не наш собственный только что отправленный ответ
+                        if self.last_sent_text and (t == self.last_sent_text or t in self.last_sent_text or self.last_sent_text in t):
+                            continue
+                        latest_text = t
                         break
 
             if not latest_text:
