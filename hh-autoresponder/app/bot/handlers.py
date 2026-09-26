@@ -1,6 +1,7 @@
 import asyncio
 import functools
 import structlog
+import html as _html
 
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -2199,7 +2200,7 @@ async def _screener_background_monitor(bot):
                                 chat_id=int(chat_id),
                                 text=(
                                     f"🎯 <b>Новый вопрос от скринера вакансий:</b>\n"
-                                    f"<i>«{q}»</i>\n\n"
+                                    f"<i>«{_html.escape(q)}»</i>\n\n"
                                     f"⏳ <i>Нейросеть готовит ответ на основе резюме...</i>"
                                 ),
                                 parse_mode="HTML",
@@ -2213,9 +2214,9 @@ async def _screener_background_monitor(bot):
 
                     card_text = (
                         f"🎯 <b>Новый вопрос от скринера вакансий:</b>\n"
-                        f"<i>«{q}»</i>\n\n"
+                        f"<i>«{_html.escape(q)}»</i>\n\n"
                         f"🤖 <b>Предлагаемый ответ (на основе резюме):</b>\n"
-                        f"<blockquote>{answer}</blockquote>\n\n"
+                        f"<blockquote>{_html.escape(answer)}</blockquote>\n\n"
                         f"Отправить этот ответ в чат рекрутеру или отредактировать?"
                     )
                     if chat_id:
@@ -2316,7 +2317,7 @@ async def cb_screener_poll(callback: CallbackQuery, **kw):
 
         status_msg = await callback.message.answer(
             f"🎯 <b>Вопрос от скринера вакансий:</b>\n"
-            f"<i>«{q}»</i>\n\n"
+            f"<i>«{_html.escape(q)}»</i>\n\n"
             f"⏳ <i>Нейросеть готовит ответ на основе резюме...</i>",
             parse_mode="HTML",
         )
@@ -2326,9 +2327,9 @@ async def cb_screener_poll(callback: CallbackQuery, **kw):
 
         card_text = (
             f"🎯 <b>Вопрос от скринера вакансий:</b>\n"
-            f"<i>«{q}»</i>\n\n"
+            f"<i>«{_html.escape(q)}»</i>\n\n"
             f"🤖 <b>Предлагаемый ответ (на основе резюме):</b>\n"
-            f"<blockquote>{answer}</blockquote>\n\n"
+            f"<blockquote>{_html.escape(answer)}</blockquote>\n\n"
             f"Отправить этот ответ в чат рекрутеру или отредактировать?"
         )
         try:
@@ -2358,7 +2359,7 @@ async def cb_screener_send(callback: CallbackQuery, **kw):
     if ok:
         await callback.message.edit_text(
             f"✅ <b>Ответ успешно отправлен в чат рекрутеру:</b>\n\n"
-            f"<blockquote>{answer}</blockquote>\n\n"
+            f"<blockquote>{_html.escape(answer)}</blockquote>\n\n"
             f"⚡️ <i>Ожидаем следующий вопрос от скринера (автоотслеживание активно)...</i>",
             parse_mode="HTML",
             reply_markup=screener_card_keyboard(has_pending=False),
@@ -2384,9 +2385,9 @@ async def cb_screener_regen(callback: CallbackQuery, **kw):
 
     card_text = (
         f"🎯 <b>Вопрос от скринера вакансий:</b>\n"
-        f"<i>«{question}»</i>\n\n"
+        f"<i>«{_html.escape(question)}»</i>\n\n"
         f"🤖 <b>Новый вариант ответа:</b>\n"
-        f"<blockquote>{answer}</blockquote>\n\n"
+        f"<blockquote>{_html.escape(answer)}</blockquote>\n\n"
         f"Отправить этот ответ в чат рекрутеру или отредактировать?"
     )
     await callback.message.edit_text(
@@ -2417,7 +2418,7 @@ async def msg_screener_custom_answer(message: Message, state: FSMContext, **kw):
     if ok:
         await message.answer(
             f"✅ <b>Ваш ответ успешно отправлен рекрутеру:</b>\n\n"
-            f"<blockquote>{custom_text}</blockquote>\n\n"
+            f"<blockquote>{_html.escape(custom_text)}</blockquote>\n\n"
             f"⚡️ <i>Ожидаем следующий вопрос от скринера (автоотслеживание активно)...</i>",
             parse_mode="HTML",
             reply_markup=screener_card_keyboard(has_pending=False),
@@ -2459,9 +2460,9 @@ async def msg_screener_custom_idea(message: Message, state: FSMContext, **kw):
     _screener_state["suggested_answer"] = final_answer
     card_text = (
         f"🎯 <b>Вопрос от скринера вакансий:</b>\n"
-        f"<i>«{question}»</i>\n\n"
+        f"<i>«{_html.escape(question)}»</i>\n\n"
         f"🤖 <b>Ваш вариант ответа (сформулирован AI):</b>\n"
-        f"<blockquote>{final_answer}</blockquote>\n\n"
+        f"<blockquote>{_html.escape(final_answer)}</blockquote>\n\n"
         f"Отправить этот ответ в чат рекрутеру или отредактировать?"
     )
 
