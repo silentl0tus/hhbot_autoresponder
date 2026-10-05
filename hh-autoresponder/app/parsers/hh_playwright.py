@@ -29,6 +29,7 @@ async def human_type(element, text: str, min_ms: int = 30, max_ms: int = 120):
     For very random feel we split text into 3-5 chunks with varied speeds.
     """
     import random
+
     if not text:
         return
     try:
@@ -43,7 +44,7 @@ async def human_type(element, text: str, min_ms: int = 30, max_ms: int = 120):
     chunk_size = max(20, len(text) // 6)
     pos = 0
     while pos < len(text):
-        chunk = text[pos:pos + chunk_size]
+        chunk = text[pos : pos + chunk_size]
         delay = random.randint(min_ms, max_ms)
         try:
             await element.press_sequentially(chunk, delay=delay)
@@ -200,7 +201,9 @@ class HHPlaywright:
         except Exception:
             pass
 
-    async def apply_to_vacancy(self, vacancy_url: str, cover_letter: str | typing.Callable, screenshot_name: str | None = None) -> bool | str:
+    async def apply_to_vacancy(
+        self, vacancy_url: str, cover_letter: str | typing.Callable, screenshot_name: str | None = None
+    ) -> bool | str:
         """Apply to vacancy via Playwright browser automation.
 
         Handles employer questions/test tasks: extracts question text,
@@ -244,13 +247,20 @@ class HHPlaywright:
                 """() => (document.body.innerText || '').slice(0, 5000).toLowerCase()"""
             )
             _HIDDEN_PATTERNS = (
-                "вам недоступна эта вакансия", "вакансия скрыта",
-                "вакансия не найдена", "vacancy not found",
-                "эта вакансия недоступна", "вакансия недоступна",
-                "вакансия закрыта", "вакансия снята с публикации",
-                "скрыта от вас", "скрыта работодателем",
-                "вакансия не активна", "вакансия не опубликована",
-                "данная вакансия недоступна", "вакансия в архиве",
+                "вам недоступна эта вакансия",
+                "вакансия скрыта",
+                "вакансия не найдена",
+                "vacancy not found",
+                "эта вакансия недоступна",
+                "вакансия недоступна",
+                "вакансия закрыта",
+                "вакансия снята с публикации",
+                "скрыта от вас",
+                "скрыта работодателем",
+                "вакансия не активна",
+                "вакансия не опубликована",
+                "данная вакансия недоступна",
+                "вакансия в архиве",
             )
             if any(p in page_text_check for p in _HIDDEN_PATTERNS):
                 log.info("hh_vacancy_unavailable", url=vacancy_url)
@@ -317,9 +327,7 @@ class HHPlaywright:
                         return "already"
                     # Full-page check — maybe the hidden-vacancy message is lower on the page
                     try:
-                        full_text = await page.evaluate(
-                            """() => (document.body.innerText || '').toLowerCase()"""
-                        )
+                        full_text = await page.evaluate("""() => (document.body.innerText || '').toLowerCase()""")
                         if any(p in full_text for p in _HIDDEN_PATTERNS):
                             log.info("hh_vacancy_hidden_late_detect", url=vacancy_url)
                             return "already"
@@ -379,7 +387,9 @@ class HHPlaywright:
                 submit_btn = await page.query_selector('.vacancy-response-popup-actions button[type="submit"]')
             if not submit_btn:
                 # On the new response page — "Откликнуться" button at the bottom
-                submit_btn = await page.query_selector('button:has-text("Откликнуться"), button:has-text("Отправить отклик"), button:has-text("Отправить"), button:has-text("Продолжить")')
+                submit_btn = await page.query_selector(
+                    'button:has-text("Откликнуться"), button:has-text("Отправить отклик"), button:has-text("Отправить"), button:has-text("Продолжить")'
+                )
 
             if submit_btn:
                 if screenshot_name:
@@ -428,6 +438,40 @@ class HHPlaywright:
                 if "/applicant/negotiations" in page.url or "vacancy_response_success" in page.url:
                     success = True
                     break
+
+                # Dismiss informational modals that appear after successful apply
+                # (e.g. "Чтобы видеть работу у дома" asking for city/district)
+                try:
+                    dismissed = await page.evaluate(
+                        """() => {
+                            const modal = document.querySelector('[role="dialog"], .bloko-modal, [class*="modal"]');
+                            if (!modal) return false;
+                            const text = (modal.innerText || '').toLowerCase();
+                            const INFORMATIONAL_HINTS = [
+                                'видеть работу у дома', 'город поиска работы',
+                                'укажите, в каком городе', 'район',
+                            ];
+                            if (!INFORMATIONAL_HINTS.some(h => text.includes(h))) return false;
+                            // Try close button (×)
+                            const closeBtn = modal.querySelector(
+                                'button[aria-label="Закрыть"], button[class*="close"], [data-qa="bloko-modal-close"]'
+                            );
+                            if (closeBtn) { closeBtn.click(); return true; }
+                            // Fallback: "Назад" button
+                            for (const b of modal.querySelectorAll('button')) {
+                                if ((b.innerText || '').trim().toLowerCase() === 'назад') {
+                                    b.click(); return true;
+                                }
+                            }
+                            return false;
+                        }"""
+                    )
+                    if dismissed:
+                        log.info("hh_dismissed_informational_modal")
+                        await page.wait_for_timeout(1000)
+                except Exception:
+                    pass
+
                 try:
                     if await page.query_selector('[data-qa="vacancy-response-link-view-topic"]'):
                         success = True
@@ -437,7 +481,18 @@ class HHPlaywright:
                         break
                     # Check text on page for confirmation
                     body_text = await page.evaluate("() => document.body.innerText")
-                    if "отклик отправлен" in body_text.lower() or "вы откликнулись" in body_text.lower() or "резюме доставлено" in body_text.lower():
+                    body_lower = body_text.lower()
+                    if any(
+                        marker in body_lower
+                        for marker in (
+                            "отклик отправлен",
+                            "вы откликнулись",
+                            "резюме доставлено",
+                            "откликнутесь ещё",
+                            "откликнитесь ещё",
+                            "приложить сопроводительное письмо",
+                        )
+                    ):
                         success = True
                         break
                 except Exception:
@@ -447,7 +502,9 @@ class HHPlaywright:
                 # УРА! Отклик прошел успешно. Теперь мы не тратим токены на мертвые вакансии!
                 # Смотрим, есть ли кнопка "Приложить сопроводительное письмо"
                 if cover_letter and callable(cover_letter):
-                    attach_btn = await page.query_selector('button:has-text("Приложить сопроводительное письмо"), span:has-text("Приложить сопроводительное письмо"), a:has-text("Приложить сопроводительное письмо")')
+                    attach_btn = await page.query_selector(
+                        'button:has-text("Приложить сопроводительное письмо"), span:has-text("Приложить сопроводительное письмо"), a:has-text("Приложить сопроводительное письмо")'
+                    )
                     if attach_btn:
                         log.info("hh_attaching_deferred_cover_letter_after_success")
                         await attach_btn.click()
@@ -455,21 +512,28 @@ class HHPlaywright:
                         # Генерируем письмо (тратим токены только сейчас!)
                         try:
                             import asyncio
-                            cl_text = await cover_letter() if asyncio.iscoroutinefunction(cover_letter) else cover_letter()
+
+                            cl_text = (
+                                await cover_letter() if asyncio.iscoroutinefunction(cover_letter) else cover_letter()
+                            )
                             if cl_text:
                                 # Ищем появившееся текстовое поле
-                                ta = await page.query_selector('textarea[placeholder*="опроводительн"], [data-qa="vacancy-response-popup-form-letter-input"]')
+                                ta = await page.query_selector(
+                                    'textarea[placeholder*="опроводительн"], [data-qa="vacancy-response-popup-form-letter-input"]'
+                                )
                                 if ta and await ta.is_visible():
                                     await ta.fill(cl_text)
                                     await page.wait_for_timeout(500)
                                     # Кликаем отправить письмо
-                                    send_btn = await page.query_selector('button:has-text("Сохранить"), button:has-text("Отправить"), button:has-text("Отправить письмо")')
+                                    send_btn = await page.query_selector(
+                                        'button:has-text("Сохранить"), button:has-text("Отправить"), button:has-text("Отправить письмо")'
+                                    )
                                     if send_btn:
                                         await send_btn.click()
                                         await page.wait_for_timeout(1000)
                         except Exception as e:
                             log.error("hh_deferred_cover_letter_attach_error", error=str(e))
-                
+
                 if screenshot_name:
                     try:
                         await page.screenshot(path=f"data/test_apply_{screenshot_name}_after.png")
@@ -489,21 +553,36 @@ class HHPlaywright:
                     )
                     if err_text:
                         log.warning("hh_apply_validation_errors", errors=err_text[:3])
-                        
+
                         # Если вакансия ЖЕСТКО требует сопроводительное
-                        if any("опроводительное письмо" in e.lower() for e in err_text) and cover_letter and callable(cover_letter):
+                        if (
+                            any("опроводительное письмо" in e.lower() for e in err_text)
+                            and cover_letter
+                            and callable(cover_letter)
+                        ):
                             log.info("hh_cover_letter_strictly_required_generating_now")
                             try:
                                 import asyncio
-                                cl_text = await cover_letter() if asyncio.iscoroutinefunction(cover_letter) else cover_letter()
+
+                                cl_text = (
+                                    await cover_letter()
+                                    if asyncio.iscoroutinefunction(cover_letter)
+                                    else cover_letter()
+                                )
                                 if cl_text:
-                                    ta = await page.query_selector('textarea[placeholder*="опроводительн"], [data-qa="vacancy-response-popup-form-letter-input"]')
+                                    ta = await page.query_selector(
+                                        'textarea[placeholder*="опроводительн"], [data-qa="vacancy-response-popup-form-letter-input"]'
+                                    )
                                     if ta and await ta.is_visible():
                                         await ta.fill(cl_text)
                                         await submit_btn.click()
                                         await page.wait_for_timeout(2000)
                                         body_text = await page.evaluate("() => document.body.innerText")
-                                        if "отклик отправлен" in body_text.lower() or "вы откликнулись" in body_text.lower() or "резюме доставлено" in body_text.lower():
+                                        if (
+                                            "отклик отправлен" in body_text.lower()
+                                            or "вы откликнулись" in body_text.lower()
+                                            or "резюме доставлено" in body_text.lower()
+                                        ):
                                             log.info("hh_apply_success_after_mandatory_cover_letter", url=vacancy_url)
                                             await browser_manager.save_context("hh")
                                             return True
@@ -518,7 +597,11 @@ class HHPlaywright:
                                 # Проверяем, исчезла ли ошибка и появился ли текст успеха
                                 await page.wait_for_timeout(2000)
                                 body_text = await page.evaluate("() => document.body.innerText")
-                                if "отклик отправлен" in body_text.lower() or "вы откликнулись" in body_text.lower() or "резюме доставлено" in body_text.lower():
+                                if (
+                                    "отклик отправлен" in body_text.lower()
+                                    or "вы откликнулись" in body_text.lower()
+                                    or "резюме доставлено" in body_text.lower()
+                                ):
                                     log.info("hh_apply_success", url=vacancy_url, final=page.url)
                                     await browser_manager.save_context("hh")
                                     return True
@@ -526,9 +609,10 @@ class HHPlaywright:
                         await self._save_debug_screenshot(page, "apply_validation_fail")
                         try:
                             from app.bot.captcha_notify import send_error_screenshot
+
                             await send_error_screenshot(
                                 "data/debug_apply_validation_fail.png",
-                                f"❌ <b>Ошибка валидации на hh.ru</b>\n\n<a href='{vacancy_url}'>Вакансия</a>\n\nПричина: {err_text[0]}\nПосмотрите на скриншот."
+                                f"❌ <b>Ошибка валидации на hh.ru</b>\n\n<a href='{vacancy_url}'>Вакансия</a>\n\nПричина: {err_text[0]}\nПосмотрите на скриншот.",
                             )
                         except Exception as e:
                             log.warning("telegram_screenshot_failed", error=str(e))
@@ -547,9 +631,10 @@ class HHPlaywright:
             # Отправляем скриншот ошибки пользователю в Telegram
             try:
                 from app.bot.captcha_notify import send_error_screenshot
+
                 await send_error_screenshot(
                     "data/debug_apply_fail.png",
-                    f"❌ <b>Ошибка отклика на hh.ru</b>\n\n<a href='{vacancy_url}'>Вакансия</a>\n\nБот не смог откликнуться или пройти проверку. Посмотрите на скриншот, чтобы понять причину."
+                    f"❌ <b>Ошибка отклика на hh.ru</b>\n\n<a href='{vacancy_url}'>Вакансия</a>\n\nБот не смог откликнуться или пройти проверку. Посмотрите на скриншот, чтобы понять причину.",
                 )
             except Exception as e:
                 log.warning("telegram_screenshot_failed", error=str(e))
@@ -595,7 +680,7 @@ class HHPlaywright:
             return False
 
         log.warning("hh_captcha_detected", url=page.url)
-        
+
         # По просьбе пользователя пропускаем попытки решения через нейросеть
         # и сразу просим ввести капчу вручную.
         return await self._request_manual_captcha(page)
@@ -620,6 +705,7 @@ class HHPlaywright:
         screenshot_path = "data/debug_captcha_manual.png"
         try:
             from pathlib import Path
+
             Path(screenshot_path).parent.mkdir(parents=True, exist_ok=True)
             Path(screenshot_path).write_bytes(self._captcha_screenshot)
         except Exception as e:
@@ -641,6 +727,7 @@ class HHPlaywright:
         # Send the screenshot image via special callback
         try:
             from app.bot.captcha_notify import send_captcha_to_user
+
             await send_captcha_to_user(screenshot_path)
         except Exception as e:
             log.warning("captcha_tg_send_error", error=str(e))
@@ -676,9 +763,7 @@ class HHPlaywright:
                 await captcha_input.fill(user_text)
                 await page.wait_for_timeout(500)
 
-                submit_btn = await page.query_selector(
-                    'button:has-text("Отправить"), button:has-text("Подтвердить")'
-                )
+                submit_btn = await page.query_selector('button:has-text("Отправить"), button:has-text("Подтвердить")')
                 if submit_btn:
                     await submit_btn.click()
                     await page.wait_for_timeout(3000)
@@ -720,17 +805,17 @@ class HHPlaywright:
         # On the new hh response page they have placeholder "Писать тут",
         # but if hh changes wording we want to be robust — take any visible
         # textarea that isn't the cover-letter textarea.
-        all_textareas = await page.query_selector_all('textarea')
+        all_textareas = await page.query_selector_all("textarea")
         question_textareas = []
         for ta in all_textareas:
             try:
                 if not await ta.is_visible():
                     continue
-                placeholder = (await ta.get_attribute('placeholder')) or ''
-                data_qa = (await ta.get_attribute('data-qa')) or ''
-                name = (await ta.get_attribute('name')) or ''
+                placeholder = (await ta.get_attribute("placeholder")) or ""
+                data_qa = (await ta.get_attribute("data-qa")) or ""
+                name = (await ta.get_attribute("name")) or ""
                 # Skip the cover-letter textarea
-                if 'letter' in data_qa.lower() or name == 'text' or 'опровод' in placeholder.lower():
+                if "letter" in data_qa.lower() or name == "text" or "опровод" in placeholder.lower():
                     continue
                 question_textareas.append(ta)
             except Exception:
@@ -739,7 +824,7 @@ class HHPlaywright:
         if not question_textareas:
             blocks = await page.query_selector_all('[data-qa="task-body"]')
             for b in blocks:
-                ta = await b.query_selector('textarea')
+                ta = await b.query_selector("textarea")
                 if ta:
                     question_textareas.append(ta)
         log.info("hh_question_textareas_found", count=len(question_textareas))
@@ -787,6 +872,7 @@ class HHPlaywright:
             )
             if radio_groups:
                 from app.ai.claude import claude_ai as _ai
+
                 for grp_name, grp in radio_groups.items():
                     options = grp.get("options", [])
                     question = grp.get("question", "") or grp_name
@@ -922,7 +1008,7 @@ class HHPlaywright:
                 "  - Проекты → RAG-система (FastAPI+Qdrant+LangGraph), ML-классификатор (PyTorch+ResNet50), аналитический дашборд\n"
                 "  - Готовность к тестовому → да, готов выполнить тестовое задание\n\n"
                 "Ответь СТРОГО в формате JSON:\n"
-                "{\"1\": \"ответ 1\", \"2\": \"ответ 2\", ...}\n"
+                '{"1": "ответ 1", "2": "ответ 2", ...}\n'
                 "Без markdown, без пояснений, только JSON."
             )
             system = (
@@ -938,6 +1024,7 @@ class HHPlaywright:
                 if ai_resp.startswith("```"):
                     ai_resp = ai_resp.split("\n", 1)[1].rsplit("```", 1)[0]
                 import json as _json
+
                 parsed = _json.loads(ai_resp)
                 for k, v in parsed.items():
                     try:
@@ -953,16 +1040,16 @@ class HHPlaywright:
         # перерисовывает форму). На retry пересобираем список textarea заново
         # и берём по индексу.
         async def _refind_question_textarea(target_idx: int):
-            fresh = await page.query_selector_all('textarea')
+            fresh = await page.query_selector_all("textarea")
             filt = []
             for t in fresh:
                 try:
                     if not await t.is_visible():
                         continue
-                    ph = (await t.get_attribute('placeholder')) or ''
-                    dq = (await t.get_attribute('data-qa')) or ''
-                    nm = (await t.get_attribute('name')) or ''
-                    if 'letter' in dq.lower() or nm == 'text' or 'опровод' in ph.lower():
+                    ph = (await t.get_attribute("placeholder")) or ""
+                    dq = (await t.get_attribute("data-qa")) or ""
+                    nm = (await t.get_attribute("name")) or ""
+                    if "letter" in dq.lower() or nm == "text" or "опровод" in ph.lower():
                         continue
                     filt.append(t)
                 except Exception:
@@ -1000,7 +1087,9 @@ class HHPlaywright:
             add_letter_btn = await page.query_selector('a:has-text("Добавить сопроводительное")')
         if not add_letter_btn:
             # On the new response page the link is just "Добавить" next to "Сопроводительное письмо"
-            add_letter_btn = await page.query_selector('a:has-text("Добавить"):right-of(:text("Сопроводительное письмо"))')
+            add_letter_btn = await page.query_selector(
+                'a:has-text("Добавить"):right-of(:text("Сопроводительное письмо"))'
+            )
         if not add_letter_btn:
             add_letter_btn = await page.query_selector('button:has-text("Добавить")')
         if add_letter_btn:
@@ -1075,7 +1164,7 @@ class HHPlaywright:
                 # Письмо будет прикреплено после успешного отклика.
                 log.info("hh_skipping_cover_letter_in_form_to_save_tokens")
                 return
-            
+
             filled = False
             for attempt in (1, 2, 3):
                 el = letter_area if attempt == 1 else await _refind_letter()
@@ -1182,16 +1271,18 @@ class HHPlaywright:
                         thread_id = f"hh_{m.group(1)}"
                 if not d.get("title") and not d.get("status"):
                     continue
-                messages.append({
-                    "platform": "hh",
-                    "title": d.get("title", ""),
-                    "company": d.get("company", ""),
-                    "status": d.get("status", ""),
-                    "text": f"Статус: {d.get('status','')}" if d.get("status") else "",
-                    "thread_id": thread_id,
-                    "sender": d.get("company", ""),
-                    "has_unread": d.get("has_unread", False),
-                })
+                messages.append(
+                    {
+                        "platform": "hh",
+                        "title": d.get("title", ""),
+                        "company": d.get("company", ""),
+                        "status": d.get("status", ""),
+                        "text": f"Статус: {d.get('status','')}" if d.get("status") else "",
+                        "thread_id": thread_id,
+                        "sender": d.get("company", ""),
+                        "has_unread": d.get("has_unread", False),
+                    }
+                )
 
             log.info("hh_messages_fetched", count=len(messages))
 
@@ -1325,7 +1416,7 @@ class HHPlaywright:
                         if items_data.get("sample_html") and page_num == 0:
                             log.info("hh_neg_sample_html", tab=tab_name, html=items_data["sample_html"][:800])
                         items_data = items_data.get("items", [])
-                    
+
                     if not items_data:
                         break
 
@@ -1357,28 +1448,33 @@ class HHPlaywright:
                         full_topic_url = ""
                         if topic_url:
                             full_topic_url = topic_url if topic_url.startswith("http") else f"https://hh.ru{topic_url}"
-                        statuses.append({
-                            "platform": "hh",
-                            "tab": _classify_status(d.get("status", "")),
-                            "title": d.get("title", ""),
-                            "company": d.get("company", ""),
-                            "status": d.get("status", ""),
-                            "last_message": d.get("last_message", ""),
-                            "text": f"Статус: {d.get('status','')}" if d.get("status") else "",
-                            "thread_id": thread_id,
-                            "topic_url": full_topic_url,
-                            "vacancy_url": href,
-                            "sender": d.get("company", ""),
-                            "has_unread": d.get("has_unread", False),
-                        })
+                        statuses.append(
+                            {
+                                "platform": "hh",
+                                "tab": _classify_status(d.get("status", "")),
+                                "title": d.get("title", ""),
+                                "company": d.get("company", ""),
+                                "status": d.get("status", ""),
+                                "last_message": d.get("last_message", ""),
+                                "text": f"Статус: {d.get('status','')}" if d.get("status") else "",
+                                "thread_id": thread_id,
+                                "topic_url": full_topic_url,
+                                "vacancy_url": href,
+                                "sender": d.get("company", ""),
+                                "has_unread": d.get("has_unread", False),
+                            }
+                        )
 
                 except Exception as e:
                     log.warning("hh_negotiations_tab_error", tab=tab_name, error=str(e))
 
-        log.info("hh_negotiations_status", total=len(statuses),
-                 invites=sum(1 for s in statuses if s["tab"] == "invitations"),
-                 discards=sum(1 for s in statuses if s["tab"] == "discard"),
-                 pending=sum(1 for s in statuses if s["tab"] == "pending"))
+        log.info(
+            "hh_negotiations_status",
+            total=len(statuses),
+            invites=sum(1 for s in statuses if s["tab"] == "invitations"),
+            discards=sum(1 for s in statuses if s["tab"] == "discard"),
+            pending=sum(1 for s in statuses if s["tab"] == "pending"),
+        )
         return statuses
 
     async def is_logged_in(self) -> bool:
@@ -1628,7 +1724,7 @@ class HHPlaywright:
                 'textarea[placeholder*="сообщение" i]',
                 'textarea[placeholder*="Введите" i]',
                 'div[contenteditable="true"]',
-                'textarea',
+                "textarea",
             ]
             chat_input = None
             for sel in input_selectors:
@@ -1793,6 +1889,7 @@ hh_playwright: HHPlaywright | None = None
 
 try:
     from app.utils.browser import browser_manager  # noqa: F811
+
     hh_playwright = HHPlaywright()
 except ImportError:
     pass
