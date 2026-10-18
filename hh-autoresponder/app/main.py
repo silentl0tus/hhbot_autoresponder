@@ -3,7 +3,6 @@ from pathlib import Path
 
 import structlog
 from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
@@ -19,6 +18,7 @@ log = structlog.get_logger()
 HAS_PLAYWRIGHT = False
 try:
     from app.utils.browser import browser_manager
+
     HAS_PLAYWRIGHT = True
 except ImportError:
     pass
@@ -46,26 +46,23 @@ def _is_quiet_hours() -> bool:
     """Тихие часы (МСК): ночью не пушим уведомления (в т.ч. DM 2-го аккаунта)."""
     from datetime import datetime
     from zoneinfo import ZoneInfo
+
     hour = datetime.now(ZoneInfo("Europe/Moscow")).hour
     return not (settings.notify_hour_start <= hour < settings.notify_hour_end)
 
 
 async def main():
-    from pathlib import Path
     import logging
     import sys
 
     Path("logs").mkdir(exist_ok=True)
-    
+
     logging.basicConfig(
         format="%(message)s",
         level=logging.INFO,
-        handlers=[
-            logging.FileHandler("logs/log.txt", mode="a", encoding="utf-8"),
-            logging.StreamHandler(sys.stdout)
-        ],
+        handlers=[logging.FileHandler("logs/log.txt", mode="a", encoding="utf-8"), logging.StreamHandler(sys.stdout)],
     )
-    
+
     structlog.configure(
         processors=[
             structlog.stdlib.add_log_level,
@@ -86,7 +83,6 @@ async def main():
         session = AiohttpSession(api=settings.tg_api_server)
         log.info("using_custom_tg_api", api=settings.tg_api_server)
     elif settings.tg_proxy:
-        from aiohttp import BasicAuth
         session = AiohttpSession(proxy=settings.tg_proxy)
         log.info("using_tg_proxy", proxy=settings.tg_proxy)
     bot = Bot(token=settings.tg_bot_token, session=session)
@@ -94,25 +90,30 @@ async def main():
     dp.include_router(router)
 
     # Регистрируем команды — появятся в меню (кнопка ☰ в Telegram)
-    await bot.set_my_commands([
-        BotCommand(command="start", description="🏠 Главное меню"),
-        BotCommand(command="stats", description="📊 Статистика"),
-        BotCommand(command="vacancies", description="🔍 Найденные вакансии"),
-        BotCommand(command="messages", description="📩 Сообщения рекрутёров"),
-        BotCommand(command="settings", description="⚙️ Настройки"),
-        BotCommand(command="logs", description="📋 Последние логи"),
-        BotCommand(command="pause", description="⏸ Поставить на паузу"),
-        BotCommand(command="resume", description="▶️ Возобновить поиск"),
-        BotCommand(command="blacklist", description="🚫 Чёрный список компаний"),
-        BotCommand(command="balance", description="💎 Баланс AI"),
-    ])
+    await bot.set_my_commands(
+        [
+            BotCommand(command="start", description="🏠 Главное меню"),
+            BotCommand(command="stats", description="📊 Статистика"),
+            BotCommand(command="vacancies", description="🔍 Найденные вакансии"),
+            BotCommand(command="messages", description="📩 Сообщения рекрутёров"),
+            BotCommand(command="settings", description="⚙️ Настройки"),
+            BotCommand(command="logs", description="📋 Последние логи"),
+            BotCommand(command="pause", description="⏸ Поставить на паузу"),
+            BotCommand(command="resume", description="▶️ Возобновить поиск"),
+            BotCommand(command="blacklist", description="🚫 Чёрный список компаний"),
+            BotCommand(command="balance", description="🤖 Модели и Настройки ИИ"),
+            BotCommand(command="ai", description="🤖 Модели и Настройки ИИ"),
+        ]
+    )
 
     # Подробный лог действий бота в Telegram (поиск/анализ/отклики).
     from app.utils import notifier
+
     notifier.configure(lambda text: notify_telegram(bot, text), verbose=True)
 
     # Wire up CAPTCHA screenshot sender (used by hh_playwright manual fallback).
     from app.bot.captcha_notify import configure as captcha_configure
+
     captcha_configure(bot, settings.tg_admin_chat_id)
 
     playwright_ok = HAS_PLAYWRIGHT

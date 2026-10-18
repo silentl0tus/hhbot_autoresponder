@@ -645,7 +645,7 @@ async def cmd_resume(message: Message, **kw):
     await message.answer("▶️ Возобновлено", reply_markup=main_menu())
 
 
-@router.message(Command("balance"))
+@router.message(Command("balance", "ai", "models"))
 @admin_only
 async def cmd_balance(message: Message, **kw):
     await _send_balance(message)
@@ -753,7 +753,7 @@ async def _send_balance(target):
         )
 
     text = (
-        "💎 <b>Настройка и Статус AI (LLM)</b>\n\n"
+        "🤖 <b>Модели и Настройки AI (LLM)</b>\n\n"
         f"⚡️ <b>Статус:</b> {status_str}\n"
         f"📌 <b>Активная модель:</b> <code>{settings.llm_model}</code>\n"
         f"🌐 <b>Base URL:</b> <code>{settings.llm_base_url}</code>\n"
@@ -1539,7 +1539,7 @@ async def cb_force_search(callback: CallbackQuery, **kw):
     await callback.message.answer(f"🔍 Найдено <b>{count}</b> новых вакансий", parse_mode="HTML")
 
 
-@router.callback_query(F.data == "show_balance")
+@router.callback_query(F.data.in_({"show_balance", "models_menu"}))
 @admin_only
 async def cb_show_balance(callback: CallbackQuery, **kw):
     await _send_balance(callback)

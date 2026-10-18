@@ -19,26 +19,32 @@ def main_menu() -> ReplyKeyboardMarkup:
 
 
 def vacancy_keyboard(vacancy_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Откликнуться", callback_data=f"apply:{vacancy_id}"),
-            InlineKeyboardButton(text="❌ Пропустить", callback_data=f"skip:{vacancy_id}"),
-        ],
-        [
-            InlineKeyboardButton(text="📄 Подробнее", callback_data=f"details:{vacancy_id}"),
-            InlineKeyboardButton(text="🚫 В ЧС", callback_data=f"blacklist:{vacancy_id}"),
-        ],
-    ])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Откликнуться", callback_data=f"apply:{vacancy_id}"),
+                InlineKeyboardButton(text="❌ Пропустить", callback_data=f"skip:{vacancy_id}"),
+            ],
+            [
+                InlineKeyboardButton(text="📄 Подробнее", callback_data=f"details:{vacancy_id}"),
+                InlineKeyboardButton(text="🚫 В ЧС", callback_data=f"blacklist:{vacancy_id}"),
+            ],
+        ]
+    )
 
 
-def vacancy_list_keyboard(vacancy_ids: list[int], page: int, total_pages: int, prefix: str = "") -> InlineKeyboardMarkup:
+def vacancy_list_keyboard(
+    vacancy_ids: list[int], page: int, total_pages: int, prefix: str = ""
+) -> InlineKeyboardMarkup:
     rows = []
     for i, vid in enumerate(vacancy_ids):
-        rows.append([
-            InlineKeyboardButton(text=f"📄 Подробнее #{i+1}", callback_data=f"details:{vid}"),
-            InlineKeyboardButton(text="✅", callback_data=f"apply:{vid}"),
-            InlineKeyboardButton(text="❌", callback_data=f"skip:{vid}"),
-        ])
+        rows.append(
+            [
+                InlineKeyboardButton(text=f"📄 Подробнее #{i+1}", callback_data=f"details:{vid}"),
+                InlineKeyboardButton(text="✅", callback_data=f"apply:{vid}"),
+                InlineKeyboardButton(text="❌", callback_data=f"skip:{vid}"),
+            ]
+        )
 
     nav = []
     if page > 0:
@@ -52,80 +58,86 @@ def vacancy_list_keyboard(vacancy_ids: list[int], page: int, total_pages: int, p
 
 
 def message_keyboard(message_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🤖 AI-ответ", callback_data=f"ai_reply:{message_id}"),
-            InlineKeyboardButton(text="✅ Прочитано", callback_data=f"mark_read:{message_id}"),
-        ],
-    ])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🤖 AI-ответ", callback_data=f"ai_reply:{message_id}"),
+                InlineKeyboardButton(text="✅ Прочитано", callback_data=f"mark_read:{message_id}"),
+            ],
+        ]
+    )
 
 
 def confirm_apply_keyboard(vacancy_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🔄 Перегенерировать", callback_data=f"regen_cl:{vacancy_id}"),
-            InlineKeyboardButton(text="🔄 Gemma", callback_data=f"regen_gemma:{vacancy_id}"),
-        ],
-        [
-            InlineKeyboardButton(text="✏️ Указать ошибку", callback_data=f"fix_cl:{vacancy_id}"),
-        ],
-        [
-            InlineKeyboardButton(text="📨 Да, отправить", callback_data=f"confirm_apply:{vacancy_id}"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data=f"cancel_apply:{vacancy_id}"),
-        ],
-    ])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🔄 Перегенерировать", callback_data=f"regen_cl:{vacancy_id}"),
+                InlineKeyboardButton(text="🔄 Gemma", callback_data=f"regen_gemma:{vacancy_id}"),
+            ],
+            [
+                InlineKeyboardButton(text="✏️ Указать ошибку", callback_data=f"fix_cl:{vacancy_id}"),
+            ],
+            [
+                InlineKeyboardButton(text="📨 Да, отправить", callback_data=f"confirm_apply:{vacancy_id}"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data=f"cancel_apply:{vacancy_id}"),
+            ],
+        ]
+    )
 
 
 def manual_cover_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="regen_manual_cl"),
-            InlineKeyboardButton(text="🔄 Gemma", callback_data="regen_manual_gemma"),
-        ],
-        [
-            InlineKeyboardButton(text="✏️ Указать ошибку", callback_data="fix_manual_cl"),
-        ],
-    ])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🔄 Перегенерировать", callback_data="regen_manual_cl"),
+                InlineKeyboardButton(text="🔄 Gemma", callback_data="regen_manual_gemma"),
+            ],
+            [
+                InlineKeyboardButton(text="✏️ Указать ошибку", callback_data="fix_manual_cl"),
+            ],
+        ]
+    )
 
 
-
-def settings_keyboard(is_paused: bool = False, auto_apply: bool = False, limit: int = 0, paused_platforms: set = None) -> InlineKeyboardMarkup:
+def settings_keyboard(
+    is_paused: bool = False, auto_apply: bool = False, limit: int = 0, paused_platforms: set = None
+) -> InlineKeyboardMarkup:
     pause_text = "▶️ Возобновить" if is_paused else "⏸ Пауза (все)"
     auto_text = "🟢 Авто-отклик ВКЛ" if auto_apply else "⚪ Авто-отклик ВЫКЛ"
-    
+
     paused_platforms = paused_platforms or set()
     hh_text = "🔴 hh.ru (выкл)" if "hh" in paused_platforms else "🟢 hh.ru (вкл)"
     habr_text = "🔴 Хабр (выкл)" if "habr" in paused_platforms else "🟢 Хабр (вкл)"
-    
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text=pause_text, callback_data="toggle_pause"),
-            InlineKeyboardButton(text=auto_text, callback_data="toggle_auto"),
-        ],
-        [
-            InlineKeyboardButton(text=hh_text, callback_data="toggle_plat:hh"),
-            InlineKeyboardButton(text=habr_text, callback_data="toggle_plat:habr"),
-        ],
-        [
-            InlineKeyboardButton(text="🔄 Искать сейчас", callback_data="force_search"),
-            InlineKeyboardButton(text="💎 Баланс AI", callback_data="show_balance"),
-        ],
-        [
-            InlineKeyboardButton(text="⬆️ Поднять резюме", callback_data="bump_resume"),
-            InlineKeyboardButton(text=f"📊 Лимит: {limit}", callback_data="limits_menu"),
-        ],
-        [
-            InlineKeyboardButton(text="🧹 Очистить отклики", callback_data="clear_neg"),
-            InlineKeyboardButton(text="💬 Скринер MAX", callback_data="screener_menu"),
-        ],
-        [
-            InlineKeyboardButton(text="💬 Чат hh.ru (Бета)", callback_data="hh_chat_menu"),
-            InlineKeyboardButton(text="🎛 Настройка функций", callback_data="behavior_menu"),
-        ],
-        [
-            InlineKeyboardButton(text="🤖 Выбор ИИ модели", callback_data="models_menu"),
-        ],
-    ])
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text=pause_text, callback_data="toggle_pause"),
+                InlineKeyboardButton(text=auto_text, callback_data="toggle_auto"),
+            ],
+            [
+                InlineKeyboardButton(text=hh_text, callback_data="toggle_plat:hh"),
+                InlineKeyboardButton(text=habr_text, callback_data="toggle_plat:habr"),
+            ],
+            [
+                InlineKeyboardButton(text="🔄 Искать сейчас", callback_data="force_search"),
+                InlineKeyboardButton(text="🤖 Модели и Настройки ИИ", callback_data="show_balance"),
+            ],
+            [
+                InlineKeyboardButton(text="⬆️ Поднять резюме", callback_data="bump_resume"),
+                InlineKeyboardButton(text=f"📊 Лимит: {limit}", callback_data="limits_menu"),
+            ],
+            [
+                InlineKeyboardButton(text="🧹 Очистить отклики", callback_data="clear_neg"),
+                InlineKeyboardButton(text="💬 Скринер MAX", callback_data="screener_menu"),
+            ],
+            [
+                InlineKeyboardButton(text="💬 Чат hh.ru (Бета)", callback_data="hh_chat_menu"),
+                InlineKeyboardButton(text="🎛 Настройка функций", callback_data="behavior_menu"),
+            ],
+        ]
+    )
 
 
 _FLAG_LABELS = {
@@ -149,32 +161,37 @@ def behavior_keyboard(flags: dict) -> InlineKeyboardMarkup:
 
 
 def clear_neg_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🚫 Убрать отказы", callback_data="clearneg:discard")],
-        [InlineKeyboardButton(text="🗓 Старше 14 дней", callback_data="clearneg:old14")],
-        [InlineKeyboardButton(text="🗓 Старше 30 дней", callback_data="clearneg:old30")],
-        [InlineKeyboardButton(text="👀 Показать без удаления", callback_data="clearneg:dry")],
-    ])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🚫 Убрать отказы", callback_data="clearneg:discard")],
+            [InlineKeyboardButton(text="🗓 Старше 14 дней", callback_data="clearneg:old14")],
+            [InlineKeyboardButton(text="🗓 Старше 30 дней", callback_data="clearneg:old30")],
+            [InlineKeyboardButton(text="👀 Показать без удаления", callback_data="clearneg:dry")],
+        ]
+    )
+
 
 def limits_keyboard(current: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="-5", callback_data="set_limit:-5"),
-            InlineKeyboardButton(text="+5", callback_data="set_limit:+5"),
-        ],
-        [
-            InlineKeyboardButton(text="25", callback_data="set_limit:25_abs"),
-            InlineKeyboardButton(text="40", callback_data="set_limit:40_abs"),
-            InlineKeyboardButton(text="50", callback_data="set_limit:50_abs"),
-            InlineKeyboardButton(text="75", callback_data="set_limit:75_abs"),
-        ],
-        [
-            InlineKeyboardButton(text="✏️ Ввести своё число", callback_data="set_limit:custom"),
-        ],
-        [
-            InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back"),
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="-5", callback_data="set_limit:-5"),
+                InlineKeyboardButton(text="+5", callback_data="set_limit:+5"),
+            ],
+            [
+                InlineKeyboardButton(text="25", callback_data="set_limit:25_abs"),
+                InlineKeyboardButton(text="40", callback_data="set_limit:40_abs"),
+                InlineKeyboardButton(text="50", callback_data="set_limit:50_abs"),
+                InlineKeyboardButton(text="75", callback_data="set_limit:75_abs"),
+            ],
+            [
+                InlineKeyboardButton(text="✏️ Ввести своё число", callback_data="set_limit:custom"),
+            ],
+            [
+                InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back"),
+            ],
         ]
-    ])
+    )
 
 
 GEMINI_MODELS = [
@@ -199,127 +216,168 @@ OPENROUTER_MODELS = [
 KNOWN_MODELS = GEMINI_MODELS
 
 
-def ai_models_keyboard(current_model: str, ai_enabled: bool = True, is_openrouter: bool = False) -> InlineKeyboardMarkup:
+def ai_models_keyboard(
+    current_model: str, ai_enabled: bool = True, is_openrouter: bool = False
+) -> InlineKeyboardMarkup:
     """Клавиатура для полного управления AI: выбор моделей, пресеты, смена ключей и прокси."""
     rows = []
     toggle_text = "🔴 Выключить AI" if ai_enabled else "🟢 Включить AI"
-    rows.append([
-        InlineKeyboardButton(text=toggle_text, callback_data="ai_toggle"),
-        InlineKeyboardButton(text="⚡️ Тест связи с AI", callback_data="ai_test_conn"),
-    ])
+    rows.append(
+        [
+            InlineKeyboardButton(text=toggle_text, callback_data="ai_toggle"),
+            InlineKeyboardButton(text="⚡️ Тест связи с AI", callback_data="ai_test_conn"),
+        ]
+    )
 
     models_list = OPENROUTER_MODELS if is_openrouter else GEMINI_MODELS
     for model_id, label in models_list:
         mark = "✅ " if current_model == model_id else ""
         rows.append([InlineKeyboardButton(text=f"{mark}{label}", callback_data=f"set_model:{model_id}")])
-    
-    rows.append([
-        InlineKeyboardButton(text="🌐 Пресет: Gemini", callback_data="ai_preset:gemini"),
-        InlineKeyboardButton(text="🚀 Пресет: OpenRouter", callback_data="ai_preset:openrouter"),
-    ])
-    rows.append([
-        InlineKeyboardButton(text="🛠 Настроить своего провайдера", callback_data="ai_custom_menu"),
-    ])
-    rows.append([
-        InlineKeyboardButton(text="🛡 Прокси для LLM", callback_data="ai_edit:proxy"),
-        InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back"),
-    ])
+
+    rows.append(
+        [
+            InlineKeyboardButton(text="🌐 Пресет: Gemini", callback_data="ai_preset:gemini"),
+            InlineKeyboardButton(text="🚀 Пресет: OpenRouter", callback_data="ai_preset:openrouter"),
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(text="🛠 Настроить своего провайдера", callback_data="ai_custom_menu"),
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(text="🛡 Прокси для LLM", callback_data="ai_edit:proxy"),
+            InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back"),
+        ]
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
 
 def custom_ai_keyboard() -> InlineKeyboardMarkup:
     """Отдельное меню для настройки кастомного провайдера (URL, Key, Model)."""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🌐 Сменить Base URL", callback_data="ai_edit:url")],
-        [InlineKeyboardButton(text="🔑 Сменить API-ключ", callback_data="ai_edit:key")],
-        [InlineKeyboardButton(text="✏️ Ввести свою модель", callback_data="ai_edit:model")],
-        [InlineKeyboardButton(text="◀️ Назад к пресетам", callback_data="show_balance")],
-    ])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🌐 Сменить Base URL", callback_data="ai_edit:url")],
+            [InlineKeyboardButton(text="🔑 Сменить API-ключ", callback_data="ai_edit:key")],
+            [InlineKeyboardButton(text="✏️ Ввести свою модель", callback_data="ai_edit:model")],
+            [InlineKeyboardButton(text="◀️ Назад к пресетам", callback_data="show_balance")],
+        ]
+    )
+
 
 def stats_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📌 Что делать дальше", callback_data="show_inbox")],
-        [InlineKeyboardButton(text="🔄 Принудительное обновление статусов", callback_data="force_sync_sheets")],
-    ])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📌 Что делать дальше", callback_data="show_inbox")],
+            [InlineKeyboardButton(text="🔄 Принудительное обновление статусов", callback_data="force_sync_sheets")],
+        ]
+    )
 
 
 def screener_card_keyboard(has_pending: bool = True) -> InlineKeyboardMarkup:
     """Клавиатура карточки вопроса от скринера вакансий."""
     rows = []
     if has_pending:
-        rows.append([
-            InlineKeyboardButton(text="📨 Отправить в чат", callback_data="screener_send"),
-            InlineKeyboardButton(text="✏️ Свой текст", callback_data="screener_edit"),
-        ])
-        rows.append([
-            InlineKeyboardButton(text="💡 Своя мысль (через AI)", callback_data="screener_custom_idea"),
-        ])
-        rows.append([
-            InlineKeyboardButton(text="🔄 Другой вариант AI", callback_data="screener_regen"),
-            InlineKeyboardButton(text="⏭ Пропустить", callback_data="screener_skip"),
-        ])
-    rows.append([
-        InlineKeyboardButton(text="🔄 Проверить новые вопросы", callback_data="screener_poll"),
-        InlineKeyboardButton(text="🛑 Закрыть скринер", callback_data="screener_stop"),
-    ])
+        rows.append(
+            [
+                InlineKeyboardButton(text="📨 Отправить в чат", callback_data="screener_send"),
+                InlineKeyboardButton(text="✏️ Свой текст", callback_data="screener_edit"),
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(text="💡 Своя мысль (через AI)", callback_data="screener_custom_idea"),
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(text="🔄 Другой вариант AI", callback_data="screener_regen"),
+                InlineKeyboardButton(text="⏭ Пропустить", callback_data="screener_skip"),
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(text="🔄 Проверить новые вопросы", callback_data="screener_poll"),
+            InlineKeyboardButton(text="🛑 Закрыть скринер", callback_data="screener_stop"),
+        ]
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def screener_menu_keyboard(is_running: bool = False) -> InlineKeyboardMarkup:
     """Клавиатура меню управления скринером MAX."""
     toggle_text = "⏹ Остановить скринер" if is_running else "▶️ Запустить скринер MAX"
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=toggle_text, callback_data="screener_toggle")],
-        [InlineKeyboardButton(text="🔄 Проверить чат сейчас", callback_data="screener_poll")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back")],
-    ])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=toggle_text, callback_data="screener_toggle")],
+            [InlineKeyboardButton(text="🔄 Проверить чат сейчас", callback_data="screener_poll")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back")],
+        ]
+    )
 
 
-def hh_chat_card_keyboard(options: list[str] | None = None, recommended_option: str | None = None, has_pending: bool = True) -> InlineKeyboardMarkup:
+def hh_chat_card_keyboard(
+    options: list[str] | None = None, recommended_option: str | None = None, has_pending: bool = True
+) -> InlineKeyboardMarkup:
     """Клавиатура для ответа на вопрос в чате HeadHunter."""
     rows = []
-    
+
     # Кнопки быстрых вариантов выбора (если рекрутер задал опрос с выбором)
     if options and has_pending:
         opt_buttons = []
         for i, opt in enumerate(options):
-            is_rec = recommended_option and (opt.lower() in recommended_option.lower() or recommended_option.lower() in opt.lower())
+            is_rec = recommended_option and (
+                opt.lower() in recommended_option.lower() or recommended_option.lower() in opt.lower()
+            )
             mark = "⭐️ " if is_rec else ""
             btn = InlineKeyboardButton(text=f"{mark}{opt}", callback_data=f"hh_opt:{i}")
             opt_buttons.append(btn)
-        
+
         # Разбиваем по 2 кнопки в ряд
         for i in range(0, len(opt_buttons), 2):
-            rows.append(opt_buttons[i:i+2])
+            rows.append(opt_buttons[i : i + 2])
 
     if has_pending:
-        rows.append([
-            InlineKeyboardButton(text="📨 Отправить AI-ответ", callback_data="hh_send_ai"),
-            InlineKeyboardButton(text="✏️ Свой текст", callback_data="hh_edit"),
-        ])
-        rows.append([
-            InlineKeyboardButton(text="💡 Своя мысль (через AI)", callback_data="hh_custom_idea"),
-        ])
-        rows.append([
-            InlineKeyboardButton(text="🔄 Другой вариант AI", callback_data="hh_regen"),
-            InlineKeyboardButton(text="⏭ Пропустить", callback_data="hh_skip"),
-        ])
-    
-    rows.append([
-        InlineKeyboardButton(text="🔄 Проверить чаты hh.ru", callback_data="hh_poll"),
-        InlineKeyboardButton(text="🛑 Закрыть", callback_data="hh_stop"),
-    ])
+        rows.append(
+            [
+                InlineKeyboardButton(text="📨 Отправить AI-ответ", callback_data="hh_send_ai"),
+                InlineKeyboardButton(text="✏️ Свой текст", callback_data="hh_edit"),
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(text="💡 Своя мысль (через AI)", callback_data="hh_custom_idea"),
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(text="🔄 Другой вариант AI", callback_data="hh_regen"),
+                InlineKeyboardButton(text="⏭ Пропустить", callback_data="hh_skip"),
+            ]
+        )
+
+    rows.append(
+        [
+            InlineKeyboardButton(text="🔄 Проверить чаты hh.ru", callback_data="hh_poll"),
+            InlineKeyboardButton(text="🛑 Закрыть", callback_data="hh_stop"),
+        ]
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def hh_chat_menu_keyboard(is_running: bool = False) -> InlineKeyboardMarkup:
     """Меню управления автоответами в чатах HeadHunter."""
     toggle_text = "⏹ Остановить мониторинг" if is_running else "▶️ Запустить автомониторинг hh.ru"
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=toggle_text, callback_data="hh_chat_toggle")],
-        [InlineKeyboardButton(text="🗂 Выбрать диалог вручную", callback_data="hh_chat_list")],
-        [InlineKeyboardButton(text="🔍 Проверить чаты сейчас", callback_data="hh_poll")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back")],
-    ])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=toggle_text, callback_data="hh_chat_toggle")],
+            [InlineKeyboardButton(text="🗂 Выбрать диалог вручную", callback_data="hh_chat_list")],
+            [InlineKeyboardButton(text="🔍 Проверить чаты сейчас", callback_data="hh_poll")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back")],
+        ]
+    )
+
 
 def hh_chat_list_keyboard(chats: list[dict], page: int = 0) -> InlineKeyboardMarkup:
     """Клавиатура со списком активных чатов (с пагинацией)."""
@@ -327,34 +385,34 @@ def hh_chat_list_keyboard(chats: list[dict], page: int = 0) -> InlineKeyboardMar
     per_page = 10
     start_idx = page * per_page
     end_idx = start_idx + per_page
-    
+
     # Показываем чаты для текущей страницы
     for c in chats[start_idx:end_idx]:
         title = c.get("title", "")
         company = c.get("company", "")
-        
-        # Если company содержит только время (например, "01:43" или "вчера"), 
+
+        # Если company содержит только время (например, "01:43" или "вчера"),
         # то скорее всего настоящее название компании или вакансии находится в title
         label = title
         if company and not company.replace(":", "").isdigit() and company != "вчера":
             label = f"{title} ({company})"
-        
+
         if not label.strip():
             label = "Неизвестный чат"
-            
+
         chat_id = c.get("chat_id")
         if not chat_id:
             continue
-        
+
         # Добавляем индикатор, если есть непрочитанные сообщения
         marker = "🔴 " if c.get("has_unread") else "💬 "
-        
+
         # Обрезаем название, чтобы влезло в кнопку
         if len(label) > 35:
             label = label[:32] + "..."
-            
+
         rows.append([InlineKeyboardButton(text=f"{marker}{label}", callback_data=f"hh_sel_chat:{chat_id}")])
-        
+
     # Пагинация
     nav_buttons = []
     if page > 0:
@@ -362,7 +420,7 @@ def hh_chat_list_keyboard(chats: list[dict], page: int = 0) -> InlineKeyboardMar
     nav_buttons.append(InlineKeyboardButton(text="🔄 Обновить", callback_data=f"hh_chat_list:{page}"))
     if len(chats) > end_idx:
         nav_buttons.append(InlineKeyboardButton(text="След. ➡️", callback_data=f"hh_chat_list:{page+1}"))
-        
+
     rows.append(nav_buttons)
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="hh_chat_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -376,7 +434,7 @@ def models_keyboard(current_model: str) -> InlineKeyboardMarkup:
         "gemini-3.5-flash-lite",
         "gemma-4-31b",
         "gemma-3-27b",
-        "openrouter", # Or a generic custom one, but let's stick to google for now
+        "openrouter",  # Or a generic custom one, but let's stick to google for now
     ]
     rows = []
     for m in models:
