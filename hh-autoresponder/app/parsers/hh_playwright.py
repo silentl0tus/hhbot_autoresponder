@@ -504,6 +504,20 @@ class HHPlaywright:
                     if dismissed:
                         log.info("hh_dismissed_informational_modal")
                         await page.wait_for_timeout(1000)
+                    else:
+                        # Если модалка опроса все еще видна, пробуем закрыть через Escape
+                        try:
+                            modal = await page.query_selector('[role="dialog"], .bloko-modal')
+                            if modal and await modal.is_visible():
+                                modal_text = (await modal.inner_text() or "").lower()
+                                if any(
+                                    h in modal_text
+                                    for h in ("какой формат", "работу у дома", "опрос", "сохранить и продолжить")
+                                ):
+                                    await page.keyboard.press("Escape")
+                                    await page.wait_for_timeout(500)
+                        except Exception:
+                            pass
                 except Exception:
                     pass
 
