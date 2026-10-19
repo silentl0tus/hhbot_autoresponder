@@ -52,7 +52,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
     paused_platforms: set[str] = set()
     pass_tests = True  # флаг «проходить тесты вакансий» (галочка в боте)
     ai_cover_letters = False
-    humanize_letters = False
+    humanize_letters = True
     limit_hh_dynamic = settings.max_applies_per_day_hh_max
     limit_habr_dynamic = settings.max_applies_per_day_habr_max
     cycle_target = target_count if target_count is not None else settings.applies_per_cycle
@@ -68,7 +68,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
             paused_platforms |= set(_st.get("manual_paused_platforms", []))
             pass_tests = _st.get("pass_tests", True)
             ai_cover_letters = _st.get("ai_cover_letters", False)
-            humanize_letters = _st.get("humanize_letters", False)
+            humanize_letters = _st.get("humanize_letters", True)
             limit_hh_dynamic = _st.get("max_applies_per_day_hh", settings.max_applies_per_day_hh_max)
             limit_habr_dynamic = _st.get("max_applies_per_day_habr", settings.max_applies_per_day_habr_max)
             if target_count is None:
@@ -187,7 +187,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
                 )
 
                 # Update AI flags
-                humanize_letters = _st.get("humanize_letters", False)
+                humanize_letters = _st.get("humanize_letters", True)
                 ai_cover_letters = _st.get("ai_cover_letters", False)
                 pass_tests = _st.get("pass_tests", True)
         except Exception:

@@ -40,7 +40,7 @@ class Settings(BaseSettings):
 
     # ── LLM (опционально: только для прохождения тестов работодателя) ──
     ai_enabled: bool = False
-    humanize_letters: bool = False
+    humanize_letters: bool = True
     llm_base_url: str = "https://openrouter.ai/api/v1"  # OpenAI-совместимый эндпоинт
     llm_api_key: str = ""
     gemini_api_key: str = ""
@@ -111,9 +111,8 @@ class Settings(BaseSettings):
             ) and not self.gemini_api_key:
                 self.gemini_api_key = self.llm_api_key
         # Для OpenRouter по умолчанию используем умный авто-рутер
-        if "openrouter" in self.llm_base_url:
-            if "gemini" in self.llm_model:
-                self.llm_model = "openrouter/auto"
+        if "openrouter" in self.llm_base_url and "gemini" in self.llm_model:
+            self.llm_model = "openrouter/auto"
         return self
 
     # ── Темп / антибан ────────────────────────────────────────

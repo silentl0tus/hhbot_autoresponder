@@ -61,7 +61,7 @@ def clean_screener_answer(text: str) -> str:
 
     result = "\n".join(filtered_lines).strip()
     # Убираем обрамляющие кавычки
-    if (result.startswith('"') and result.endswith('"')) or (result.startswith('«') and result.endswith('»')):
+    if (result.startswith('"') and result.endswith('"')) or (result.startswith("«") and result.endswith("»")):
         result = result[1:-1].strip()
 
     return result
@@ -73,8 +73,17 @@ def clean_cover_letter(text: str) -> str:
     if not text:
         return ""
 
-    # Убираем преамбулы вроде "Text:", "Письмо:", "Сопроводительное письмо:"
-    text = re.sub(r"^(Text|Сопроводительное письмо|Письмо|Текст письма):\s*", "", text, flags=re.IGNORECASE).strip()
+    # Убираем обертки code block (```)
+    text = re.sub(r"^```[a-zA-Z]*\n?", "", text).strip()
+    text = re.sub(r"\n?```$", "", text).strip()
+
+    # Убираем преамбулы вроде "Text:", "Письмо:", "Сопроводительное письмо:", "Вот вариант:"
+    text = re.sub(
+        r"^(Вот\s+(отредактированный|очеловеченный|финальный|исправленный)?\s*(текст|вариант|отклик)?|Text|Сопроводительное письмо|Письмо|Текст письма):\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
 
     # Шаблоны фраз отклика, которые избыточны в интерфейсе чата HH
     vacancy_intro_pattern = re.compile(
@@ -105,14 +114,14 @@ def clean_cover_letter(text: str) -> str:
         filtered_lines.append(line)
 
     result = "\n".join(filtered_lines).strip()
-    
+
     # Удаляем любые упоминания "ИИ-балл", которые мог добавить гуманизатор
     result = re.sub(r"(?i)\n*ии-балл:?\s*\d*(/\d*)?\s*.*$", "", result).strip()
-    
+
     # На всякий случай удаляем плейсхолдеры в конце, если они просочились
     result = re.sub(r"(?i)\n*с уважением,\s*\[?(вставьте\s*)?(своё|ваше)?\s*имя\]?.*$", "", result).strip()
 
-    if (result.startswith('"') and result.endswith('"')) or (result.startswith('«') and result.endswith('»')):
+    if (result.startswith('"') and result.endswith('"')) or (result.startswith("«") and result.endswith("»")):
         result = result[1:-1].strip()
 
     return result
@@ -156,8 +165,6 @@ ASSISTANT_REFUSAL_PATTERNS = [
 ]
 
 
-
-
 class ClaudeAI:
     """Опциональный LLM-помощник (OpenAI-совместимый эндпоинт, напр. polza.ai).
 
@@ -179,11 +186,12 @@ class ClaudeAI:
             self._client = httpx.AsyncClient(**client_kwargs)
         except ValueError as e:
             import structlog
+
             structlog.get_logger().error("invalid_proxy_scheme", error=str(e), proxy=proxy)
             client_kwargs.pop("proxy", None)
             client_kwargs["trust_env"] = False
             self._client = httpx.AsyncClient(**client_kwargs)
-            
+
         self._floor = settings.llm_max_tokens_floor
         self.last_error: str | None = None
 
@@ -204,6 +212,7 @@ class ClaudeAI:
             self._client = httpx.AsyncClient(**client_kwargs)
         except ValueError as e:
             import structlog
+
             structlog.get_logger().error("invalid_proxy_scheme", error=str(e), proxy=proxy)
             client_kwargs.pop("proxy", None)
             client_kwargs["trust_env"] = False
@@ -216,6 +225,7 @@ class ClaudeAI:
         settings.llm_model = model_name
         try:
             from app.config import save_env_variable
+
             save_env_variable("LLM_MODEL", model_name)
         except Exception as e:
             log.warning("update_env_model_failed", error=str(e))
@@ -230,14 +240,14 @@ class ClaudeAI:
         system = "You are an expert at solving CAPTCHAs. Return ONLY the text visible in the CAPTCHA image. Do not add any punctuation, markdown, or other text."
         user_message = [
             {"type": "text", "text": "Extract the text from this image:"},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_img}"}}
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_img}"}},
         ]
         # Для капчи используем либо дефолтную (должна поддерживать vision, как gpt-4o, gemini-3.5-flash),
         # либо принудительно быструю модель (она тоже обычно поддерживает)
         vision_model = self._get_fast_model()
         if "qwen3.8-27b" in vision_model:  # qwen3.8-27b:free не умеет vision
             vision_model = settings.llm_model  # fallback на основную модель
-            
+
         resp, _, _ = await self._call(system, user_message, max_tokens=20, model=vision_model)
         # Очищаем возможный мусор
         cleaned = resp.replace("```", "").replace("\n", "").strip()
@@ -256,7 +266,9 @@ class ClaudeAI:
             return "gemini-3.5-flash-lite"
         return settings.llm_model
 
-    async def _call(self, system: str, user_message: str | list, max_tokens: int = 1024, model: str | None = None) -> tuple[str, int, int]:
+    async def _call(
+        self, system: str, user_message: str | list, max_tokens: int = 1024, model: str | None = None
+    ) -> tuple[str, int, int]:
         self.last_error = None
         if not _ai_ready():
             if not settings.ai_enabled:
@@ -284,7 +296,7 @@ class ClaudeAI:
                 "gemini-3.7-flash",
                 "gemini-3.6-flash",
                 "gemini-3.5-flash-lite",
-                "gemini-3.5-flash"
+                "gemini-3.5-flash",
             ]
             for fb in google_preset:
                 if fb not in fallback_chain:
@@ -362,6 +374,7 @@ class ClaudeAI:
                 if e.response.status_code == 429:
                     # Уперлись в лимит запросов в минуту (RPM). Делаем паузу перед тем, как стучаться в следующую модель.
                     import asyncio
+
                     await asyncio.sleep(3)
             except Exception as e:
                 last_error_text = f"{type(e).__name__} ({candidate_model}): {str(e)[:150]}"
@@ -375,7 +388,16 @@ class ClaudeAI:
         self.last_error = last_error_text or "Все модели в цепочке fallback завершились ошибкой"
         return "", 0, 0
 
-    async def generate_cover_letter(self, vacancy_title: str, vacancy_description: str, company_name: str = "", humanize: bool = False, feedback: str = "", previous_cover_letter: str = "", force_model: str = None) -> tuple[str, int, int]:
+    async def generate_cover_letter(
+        self,
+        vacancy_title: str,
+        vacancy_description: str,
+        company_name: str = "",
+        humanize: bool = True,
+        feedback: str = "",
+        previous_cover_letter: str = "",
+        force_model: str | None = None,
+    ) -> tuple[str, int, int]:
         if not _ai_ready():
             reason = "AI выключен в настройках" if not settings.ai_enabled else "Отсутствует LLM_API_KEY"
             log.info("ai_disabled_fallback_used", reason=reason)
@@ -385,7 +407,7 @@ class ClaudeAI:
             resume=settings.resume_text,
             company_name=company_name or "Уважаемый работодатель",
             vacancy_title=vacancy_title,
-            vacancy_description=vacancy_description[:2000]  # Limit to save tokens
+            vacancy_description=vacancy_description[:2000],  # Limit to save tokens
         )
         user_msg = (
             "Напиши сопроводительное письмо для этой вакансии. "
@@ -397,7 +419,7 @@ class ClaudeAI:
             user_msg += f"\nСгенерируй письмо заново, ОБЯЗАТЕЛЬНО учтя следующее исправление/ошибку от пользователя:\n{feedback}"
         # Лимит 2500 токенов достаточен и для текста письма, и для запаса на reasoning-модели
         text, inp_tok, out_tok = await self._call(system, user_msg, max_tokens=2500, model=force_model)
-        
+
         # Очищаем от вводных фраз отклика ("Откликаюсь на вакансию..."), которые уже есть в интерфейсе HH
         if text:
             text = clean_cover_letter(text)
@@ -405,9 +427,16 @@ class ClaudeAI:
         # Валидация: письмо соискателя на русском языке не должно быть сырым дампом рассуждений на английском
         if text:
             has_cyrillic = bool(re.search(r"[а-яёА-ЯЁ]", text))
-            has_reasoning_leak = any(marker in text.lower() for marker in (
-                "we need answer", "candidate has", "strict facts", "forbidden exact phrase", "need map requirements"
-            ))
+            has_reasoning_leak = any(
+                marker in text.lower()
+                for marker in (
+                    "we need answer",
+                    "candidate has",
+                    "strict facts",
+                    "forbidden exact phrase",
+                    "need map requirements",
+                )
+            )
             if not has_cyrillic or has_reasoning_leak:
                 log.warning(
                     "ai_cover_letter_invalid_output_rejected",
@@ -421,9 +450,7 @@ class ClaudeAI:
         # модель не следует промпту и пишет сервисное сообщение вместо письма.
         if text:
             text_lower = text.lower()
-            refusal_hit = next(
-                (p for p in ASSISTANT_REFUSAL_PATTERNS if p in text_lower), None
-            )
+            refusal_hit = next((p for p in ASSISTANT_REFUSAL_PATTERNS if p in text_lower), None)
             if refusal_hit:
                 log.warning(
                     "ai_cover_letter_refusal_pattern_rejected",
@@ -437,6 +464,7 @@ class ClaudeAI:
             log.warning("ai_cover_letter_generation_failed", error=err_reason)
             try:
                 from app.utils import notifier
+
                 await notifier.send(
                     f"⚠️ <b>Внимание: Использована заглушка для отклика!</b>\n\n"
                     f"📌 <b>Вакансия:</b> {vacancy_title}\n"
@@ -456,7 +484,12 @@ class ClaudeAI:
                 "3. Сохраняй все технические факты из оригинала, не придумывай новый опыт."
             )
             humanize_msg = f"Очеловечь следующий текст сопроводительного письма, применяя свои правила.{strict_rules}\n\nТекст:\n{text}"
-            humanized_text, h_inp, h_out = await self._call(humanize_system, humanize_msg, max_tokens=2500, model=settings.llm_model)
+            humanized_text, h_inp, h_out = await self._call(
+                humanize_system,
+                humanize_msg,
+                max_tokens=2500,
+                model=force_model or settings.llm_model,
+            )
             if humanized_text and re.search(r"[а-яёА-ЯЁ]", humanized_text):
                 text = clean_cover_letter(humanized_text)
             else:
@@ -467,7 +500,9 @@ class ClaudeAI:
 
         return text.strip(), inp_tok, out_tok
 
-    async def generate_reply(self, recruiter_message: str, vacancy_context: str = "", platform: str = "") -> tuple[str, int, int]:
+    async def generate_reply(
+        self, recruiter_message: str, vacancy_context: str = "", platform: str = "", humanize: bool = True
+    ) -> tuple[str, int, int]:
         if not _ai_ready():
             return "", 0, 0
         system = SYSTEM_REPLY_GENERATOR.format(
@@ -483,6 +518,7 @@ class ClaudeAI:
             log.warning("ai_reply_generation_failed", error=err_reason)
             try:
                 from app.utils import notifier
+
                 await notifier.send(
                     f"⚠️ <b>Ошибка при генерации ответа рекрутёру через AI!</b>\n\n"
                     f"❌ <b>Причина ошибки LLM API:</b>\n<code>{err_reason}</code>"
@@ -490,7 +526,26 @@ class ClaudeAI:
             except Exception as e:
                 log.warning("notifier_error", error=str(e))
             return "", 0, 0
-        return text.strip(), inp_tok, out_tok
+
+        if humanize:
+            humanize_system = (
+                "Ты — соискатель, редактирующий собственное короткое сообщение рекрутеру.\n"
+                "Твоя цель: убрать признаки ИИ-генерации (канцеляризмы 'данный/является/осуществляет', "
+                "клише, стерильность) и сделать текст живым, разговорно-деловым и естественным, сохранив все технические факты.\n"
+                "КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО писать преамбулы ('Вот вариант', 'Как мог бы написать живой человек') "
+                "и предлагать несколько вариантов ответа. Выведи СТРОГО ЕДИНСТВЕННЫЙ готовый текст сообщения соискателя."
+            )
+            humanize_msg = f"Отредактируй это сообщение для чата:\n{text}"
+            humanized_text, h_inp, h_out = await self._call(
+                humanize_system, humanize_msg, max_tokens=600, model=self._get_fast_model()
+            )
+            if humanized_text:
+                text = humanized_text
+            inp_tok += h_inp
+            out_tok += h_out
+
+        clean_text = clean_screener_answer(text)
+        return clean_text or text.strip(), inp_tok, out_tok
 
     async def generate_screener_answer(
         self,
@@ -529,7 +584,9 @@ class ClaudeAI:
                 "и предлагать несколько вариантов ответа. Выведи СТРОГО ЕДИНСТВЕННЫЙ готовый текст сообщения соискателя."
             )
             humanize_msg = f"Отредактируй это сообщение для чата:\n{text}"
-            humanized_text, h_inp, h_out = await self._call(humanize_system, humanize_msg, max_tokens=600, model=self._get_fast_model())
+            humanized_text, h_inp, h_out = await self._call(
+                humanize_system, humanize_msg, max_tokens=600, model=self._get_fast_model()
+            )
             if humanized_text:
                 text = humanized_text
             inp_tok += h_inp
@@ -606,7 +663,9 @@ class ClaudeAI:
                 "и предлагать несколько вариантов ответа. Выведи СТРОГО ЕДИНСТВЕННЫЙ готовый текст сообщения соискателя."
             )
             humanize_msg = f"Отредактируй это сообщение для чата:\n{text_body}"
-            humanized_text, h_inp, h_out = await self._call(humanize_system, humanize_msg, max_tokens=600, model=self._get_fast_model())
+            humanized_text, h_inp, h_out = await self._call(
+                humanize_system, humanize_msg, max_tokens=600, model=self._get_fast_model()
+            )
             if humanized_text:
                 text_body = humanized_text
             inp_tok += h_inp
@@ -627,7 +686,6 @@ class ClaudeAI:
             return json.loads(clean)
         except (json.JSONDecodeError, IndexError):
             return default
-
 
     async def test_connection(self) -> tuple[bool, str]:
         """Проверяет подключение к LLM API и возвращает (успех, сообщение/ошибка)."""
@@ -657,26 +715,41 @@ class ClaudeAI:
             self.last_error = err
             return False, err
 
-
     async def generate_custom_idea_answer(
         self,
         question: str,
         user_idea: str,
+        humanize: bool = True,
     ) -> str:
         """Генерирует финальный ответ рекрутеру на основе черновой мысли пользователя."""
         if not settings.ai_enabled:
             return user_idea
-            
+
         from app.ai.prompts import SYSTEM_CUSTOM_IDEA_GENERATOR
-        
+
         sys_prompt = SYSTEM_CUSTOM_IDEA_GENERATOR.format(
             question=question,
             user_idea=user_idea,
         )
         user_prompt = "Пожалуйста, сформируй ответ на основе моей идеи."
-        
-        ans, inp, outp = await self._call(sys_prompt, user_prompt, max_tokens=300)
-        return clean_screener_answer(ans) if ans else user_idea
+
+        ans, _, _ = await self._call(sys_prompt, user_prompt, max_tokens=300)
+        if not ans:
+            return user_idea
+
+        if humanize:
+            humanize_system = (
+                "Ты — соискатель, редактирующий собственное короткое сообщение рекрутеру.\n"
+                "Твоя цель: убрать канцеляризмы и клише, сделав текст живым и профессиональным, "
+                "строго сохраняя смысл исходной мысли. Не добавляй приветствий, не придумывай новые факты. "
+                "Выведи ТОЛЬКО финальный текст ответа соискателя."
+            )
+            humanize_msg = f"Отредактируй это сообщение для чата:\n{ans}"
+            h_ans, _, _ = await self._call(humanize_system, humanize_msg, max_tokens=300, model=self._get_fast_model())
+            if h_ans:
+                ans = h_ans
+
+        return clean_screener_answer(ans) or ans
 
 
 claude_ai = ClaudeAI()

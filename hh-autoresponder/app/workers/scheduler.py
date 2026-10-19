@@ -40,7 +40,7 @@ class WorkerScheduler:
         # Флаги «что делает бот» (галочки в боте). По умолчанию включены.
         self.pass_tests = state.get("pass_tests", True)
         self.ai_cover_letters = state.get("ai_cover_letters", False)
-        self.humanize_letters = state.get("humanize_letters", False)
+        self.humanize_letters = state.get("humanize_letters", True)
         self.notify_messages = state.get("notify_messages", True)
         self.thank_rejections = state.get("thank_rejections", True)
         self.bump_resume = state.get("bump_resume", True)

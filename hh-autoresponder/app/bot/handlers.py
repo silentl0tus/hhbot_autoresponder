@@ -319,7 +319,7 @@ async def process_manual_cover(message: Message, state: FSMContext, **kw):
             vacancy_title=title,
             vacancy_description=description,
             company_name=company,
-            humanize=settings.humanize_letters,
+            humanize=True,
         )
 
         if claude_ai.last_error:
@@ -362,7 +362,7 @@ async def cb_regen_manual_cl(callback: CallbackQuery, state: FSMContext, **kw):
             vacancy_title=title,
             vacancy_description=description,
             company_name=company,
-            humanize=settings.humanize_letters,
+            humanize=True,
             force_model=force_model,
         )
         if cover_text:
@@ -425,7 +425,7 @@ async def handle_manual_cl_feedback(message: Message, state: FSMContext, **kw):
             vacancy_title=title,
             vacancy_description=description,
             company_name=company,
-            humanize=settings.humanize_letters,
+            humanize=True,
             feedback=message.text,
             previous_cover_letter=previous_cover_letter,
         )
@@ -1166,7 +1166,7 @@ async def cb_apply(callback: CallbackQuery, **kw):
 
     await callback.answer("🤖 Генерирую письмо...")
 
-    humanize = _scheduler.humanize_letters if _scheduler else False
+    humanize = _scheduler.humanize_letters if _scheduler else True
     letter, _, _ = await claude_ai.generate_cover_letter(title, desc, "", humanize=humanize)
 
     await callback.message.answer(
@@ -1191,7 +1191,7 @@ async def cb_regen_cl(callback: CallbackQuery, **kw):
     await callback.message.edit_text("🤖 Перегенерирую письмо...")
 
     force_model = "gemma-4-26b-a4b-it" if callback.data.startswith("regen_gemma:") else None
-    humanize = _scheduler.humanize_letters if _scheduler else False
+    humanize = _scheduler.humanize_letters if _scheduler else True
     letter, _, _ = await claude_ai.generate_cover_letter(title, desc, "", humanize=humanize, force_model=force_model)
 
     if letter:
@@ -1255,7 +1255,7 @@ async def handle_cl_feedback(message: Message, state: FSMContext, **kw):
 
     processing_msg = await message.reply("🤖 Генерирую исправленный вариант...")
 
-    humanize = _scheduler.humanize_letters if _scheduler else False
+    humanize = _scheduler.humanize_letters if _scheduler else True
     letter, _, _ = await claude_ai.generate_cover_letter(
         title, desc, "", humanize=humanize, feedback=message.text, previous_cover_letter=previous_cover_letter
     )
@@ -1576,7 +1576,7 @@ _BEHAVIOR_DEFAULTS = {
     "auto_apply": False,
     "pass_tests": True,
     "ai_cover_letters": False,
-    "humanize_letters": False,
+    "humanize_letters": True,
     "notify_messages": True,
     "thank_rejections": True,
     "bump_resume": True,
@@ -1877,7 +1877,7 @@ async def cmd_test_apply(message: Message, **kw):
         await message.answer(f"<b>[{tag}]</b> {title}\n🏢 {company}\n🤖 Генерирую письмо...", parse_mode="HTML")
 
         try:
-            humanize = _scheduler.humanize_letters if _scheduler else False
+            humanize = _scheduler.humanize_letters if _scheduler else True
             letter, _, _ = await claude_ai.generate_cover_letter(v.title, v.description or "", humanize=humanize)
         except Exception as e:
             await message.answer(f"❌ AI ошибка: {e}")
