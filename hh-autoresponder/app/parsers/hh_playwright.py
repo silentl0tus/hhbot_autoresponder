@@ -833,8 +833,8 @@ class HHPlaywright:
         try:
             radio_groups = await page.evaluate(
                 """() => {
-                    // Find all radio inputs grouped by name
-                    const radios = document.querySelectorAll('input[type=radio]');
+                    // Find all radio/checkbox inputs grouped by name
+                    const radios = document.querySelectorAll('input[type=radio], input[type=checkbox]');
                     const groups = {};
                     for (const r of radios) {
                         if (r.offsetParent === null && (r.closest('[hidden]') || r.style.display === 'none')) continue;
@@ -854,7 +854,7 @@ class HHPlaywright:
                     }
                     // Try to find the question text for each group
                     for (const name in groups) {
-                        const first = document.querySelector(`input[type=radio][name="${name}"]`);
+                        const first = document.querySelector(`input[name="${name}"]`);
                         if (!first) continue;
                         let cur = first;
                         for (let i = 0; i < 8; i++) {
@@ -934,12 +934,12 @@ class HHPlaywright:
 
                     chosen = options[chosen_idx]
                     log.info("hh_radio_chosen", question=question[:60], pick=chosen["label"][:40])
-                    # Click the radio
+                    # Click the option
                     try:
                         if chosen.get("id"):
-                            sel = f'input[type=radio]#{chosen["id"]}'
+                            sel = f'input#{chosen["id"]}'
                         else:
-                            sel = f'input[type=radio][name="{grp_name}"][value="{chosen["value"]}"]'
+                            sel = f'input[name="{grp_name}"][value="{chosen["value"]}"]'
                         await page.check(sel)
                         await page.wait_for_timeout(300)
                     except Exception as e:

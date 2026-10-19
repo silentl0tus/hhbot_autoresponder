@@ -4,6 +4,7 @@
 configs/resume.txt
 **/configs/*.json
 **/configs/resume.txt
+**/configs/resume_2ver.txt
 
 # Рантайм-данные (база, сессии браузера, токены)
 data/

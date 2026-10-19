@@ -1,4 +1,3 @@
-import asyncio
 import json
 import random
 from datetime import datetime, timedelta, timezone
@@ -31,8 +30,12 @@ class WorkerScheduler:
             self.max_applies_per_day_hh = state.get("max_applies_per_day_hh", settings.max_applies_per_day_hh_max)
             self.max_applies_per_day_habr = state.get("max_applies_per_day_habr", settings.max_applies_per_day_habr_max)
         else:
-            self.max_applies_per_day_hh = random.randint(settings.max_applies_per_day_hh_min, settings.max_applies_per_day_hh_max)
-            self.max_applies_per_day_habr = random.randint(settings.max_applies_per_day_habr_min, settings.max_applies_per_day_habr_max)
+            self.max_applies_per_day_hh = random.randint(
+                settings.max_applies_per_day_hh_min, settings.max_applies_per_day_hh_max
+            )
+            self.max_applies_per_day_habr = random.randint(
+                settings.max_applies_per_day_habr_min, settings.max_applies_per_day_habr_max
+            )
             self.limit_generated_date = datetime.now(MSK).strftime("%Y-%m-%d")
         # Флаги «что делает бот» (галочки в боте). По умолчанию включены.
         self.pass_tests = state.get("pass_tests", True)
@@ -41,6 +44,7 @@ class WorkerScheduler:
         self.notify_messages = state.get("notify_messages", True)
         self.thank_rejections = state.get("thank_rejections", True)
         self.bump_resume = state.get("bump_resume", True)
+        self.applies_per_cycle = state.get("applies_per_cycle", settings.applies_per_cycle)
         # llm_model теперь читается напрямую из .env, игнорируем state
         self.min_ai_score = 30
         self.notify = notify_callback  # async fn(text) -> sends to TG
@@ -107,7 +111,9 @@ class WorkerScheduler:
             state["is_paused"] = self.is_paused
             state["auto_apply"] = self.auto_apply
             state["max_applies_per_day_hh"] = self.max_applies_per_day_hh
-            state["max_applies_per_day_habr"] = getattr(self, "max_applies_per_day_habr", settings.max_applies_per_day_habr_max)
+            state["max_applies_per_day_habr"] = getattr(
+                self, "max_applies_per_day_habr", settings.max_applies_per_day_habr_max
+            )
             state["limit_generated_date"] = self.limit_generated_date
             state["pass_tests"] = self.pass_tests
             state["ai_cover_letters"] = self.ai_cover_letters
@@ -115,6 +121,7 @@ class WorkerScheduler:
             state["notify_messages"] = self.notify_messages
             state["thank_rejections"] = self.thank_rejections
             state["bump_resume"] = self.bump_resume
+            state["applies_per_cycle"] = self.applies_per_cycle
             # llm_model сохраняется в .env, не нужно дублировать в state
             state["paused_platforms"] = sorted(self.paused_platforms)
             state["manual_paused_platforms"] = sorted(self.manual_paused_platforms)
@@ -187,6 +194,7 @@ class WorkerScheduler:
             name="Проверка сообщений",
         )
         from datetime import datetime, timedelta
+
         self.scheduler.add_job(
             self._job_apply,
             "interval",
@@ -292,31 +300,60 @@ class WorkerScheduler:
             platform_label = {"hh": "hh.ru", "habr": "Хабр Карьера", "avito": "Авито"}
             # Отказы — игнорируем (юзер просил тишину по ним, чаты закрываются)
             REJECT_PAT = (
-                "отказ", "не подош", "отклонил", "отклонен", "решил остановить",
-                "к сожалению, в настоящий момент", "к сожалению, мы не готовы",
-                "к сожалению, мы вынуждены", "не готовы пригласить",
-                "вынуждены отказать", "выбрали другого", "в пользу другого",
-                "вернуться к вашей кандидатуре", "сохраним ваше резюме",
-                "желаем вам успехов", "желаем успехов в поиске",
-                "позиция закрыта", "вакансия закрыта", "архив",
+                "отказ",
+                "не подош",
+                "отклонил",
+                "отклонен",
+                "решил остановить",
+                "к сожалению, в настоящий момент",
+                "к сожалению, мы не готовы",
+                "к сожалению, мы вынуждены",
+                "не готовы пригласить",
+                "вынуждены отказать",
+                "выбрали другого",
+                "в пользу другого",
+                "вернуться к вашей кандидатуре",
+                "сохраним ваше резюме",
+                "желаем вам успехов",
+                "желаем успехов в поиске",
+                "позиция закрыта",
+                "вакансия закрыта",
+                "архив",
             )
             # Шум: статусы, означающие "это просто наш свежий отклик" или нейтральный
             # промежуточный статус без реального действия от работодателя.
             # Без этого фильтра каждый наш авто-отклик через 5 мин превращается
             # в фейковое "новое сообщение" (hh создал чат — мы его видим как new thread).
             NOISE_PAT = (
-                "резюме отправлено", "отклик отправлен", "отклик доставлен",
-                "не просмотрено", "просмотрено", "новый",
-                "ожидании", "ожидает", "думают", "думает",
+                "резюме отправлено",
+                "отклик отправлен",
+                "отклик доставлен",
+                "не просмотрено",
+                "просмотрено",
+                "новый",
+                "ожидании",
+                "ожидает",
+                "думают",
+                "думает",
             )
             # Действительно стоит уведомлять: реальные действия рекрутёра
             NOTIFY_STATUS_PAT = (
-                "пригласил", "приглаш", "интервью", "собеседован",
-                "оффер", "офер",
-                "звонок", "позвон", "созвон",
-                "тестовое", "задание",
-                "получен ответ", "ответ работодателя",
-                "написал", "сообщение от", "новое сообщение",
+                "пригласил",
+                "приглаш",
+                "интервью",
+                "собеседован",
+                "оффер",
+                "офер",
+                "звонок",
+                "позвон",
+                "созвон",
+                "тестовое",
+                "задание",
+                "получен ответ",
+                "ответ работодателя",
+                "написал",
+                "сообщение от",
+                "новое сообщение",
             )
 
             # Импорты для DB-чека на эхо нашего отклика
@@ -328,9 +365,7 @@ class WorkerScheduler:
             # created_at в БД — наивное UTC (SQLite). Сравнивать с MSK-временем
             # нельзя: окно "уезжает" на 3 часа и эхо-проверка не срабатывает.
             # Берём UTC-naive.
-            echo_cutoff = (
-                datetime.now(timezone.utc) - timedelta(minutes=45)
-            ).replace(tzinfo=None)
+            echo_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=45)).replace(tzinfo=None)
 
             for msg in new_msgs:
                 status_lc = (msg.get("status", "") or "").lower().strip()
@@ -405,6 +440,7 @@ class WorkerScheduler:
                     f"{msg.get('text', '')[:600]}"
                 )
                 from app.bot.keyboards import message_keyboard
+
                 kb = message_keyboard(msg.get("id")) if msg.get("id") else None
                 await self._notify_if_allowed(text, reply_markup=kb)
         except Exception as e:
@@ -413,31 +449,34 @@ class WorkerScheduler:
     async def _job_apply(self):
         if self.is_paused or not self.auto_apply:
             return
-            
+
         if self._is_quiet_hours():
             return
 
         today_str = datetime.now(MSK).strftime("%Y-%m-%d")
         if self.limit_generated_date != today_str:
-            self.max_applies_per_day_hh = random.randint(settings.max_applies_per_day_hh_min, settings.max_applies_per_day_hh_max)
+            self.max_applies_per_day_hh = random.randint(
+                settings.max_applies_per_day_hh_min, settings.max_applies_per_day_hh_max
+            )
             self.limit_generated_date = today_str
             self._save_state()
             log.info("bot_limit_daily_generated", limit=self.max_applies_per_day_hh)
         try:
             # Уведомления больше не отсылаем поминутно — статистика идёт
             # пакетом через _job_apply_summary каждые 2 часа.
-            await run_auto_apply(auto_mode=True, min_score=self.min_ai_score)
+            await run_auto_apply(auto_mode=True, min_score=self.min_ai_score, target_count=self.applies_per_cycle)
         except Exception as e:
             log.error("job_apply_error", error=str(e))
 
     async def _job_bump_resume(self):
         if self.is_paused or not self.bump_resume:
             return
-            
+
         if self._is_quiet_hours():
             return
         try:
             from app.parsers.hh_playwright import hh_playwright
+
             if not hh_playwright:
                 return
             count = await hh_playwright.bump_resumes()
@@ -485,9 +524,8 @@ class WorkerScheduler:
                 log.warning("login_health_hh_check_error", error=str(e))
                 status["hh"] = False
 
-
-            newly_broken: list[str] = []   # сессии, которые СЕЙЧАС слетели (для уведомления)
-            recovered: list[str] = []      # сессии, которые ожили (auto-unpause)
+            newly_broken: list[str] = []  # сессии, которые СЕЙЧАС слетели (для уведомления)
+            recovered: list[str] = []  # сессии, которые ожили (auto-unpause)
             state_changed = False
 
             for plat, ok in status.items():
@@ -549,9 +587,7 @@ class WorkerScheduler:
             # Уведомление о восстановлении
             if recovered and self.notify:
                 try:
-                    msg = "✅ <b>Сессия восстановлена:</b> " + ", ".join(
-                        PLATFORM_LABEL.get(p, p) for p in recovered
-                    )
+                    msg = "✅ <b>Сессия восстановлена:</b> " + ", ".join(PLATFORM_LABEL.get(p, p) for p in recovered)
                     await self.notify(msg)
                     for p in recovered:
                         self._last_login_alert.pop(p, None)
@@ -595,11 +631,13 @@ class WorkerScheduler:
             window_start_db = window_start.astimezone(timezone.utc).replace(tzinfo=None)
 
             async with async_session() as session:
-                rows = (await session.execute(
-                    select(Application.platform, Application.status, func.count(Application.id))
-                    .where(Application.created_at >= window_start_db)
-                    .group_by(Application.platform, Application.status)
-                )).all()
+                rows = (
+                    await session.execute(
+                        select(Application.platform, Application.status, func.count(Application.id))
+                        .where(Application.created_at >= window_start_db)
+                        .group_by(Application.platform, Application.status)
+                    )
+                ).all()
 
                 sent_by_plat: dict[str, int] = {}
                 failed_by_plat: dict[str, int] = {}
@@ -616,8 +654,7 @@ class WorkerScheduler:
                     # Heartbeat: пользователь хочет сводку каждые 2 часа даже
                     # при нуле — чтобы видеть, что бот жив. Шлём короткое.
                     today_sent_e = await session.scalar(
-                        select(func.count(Application.id))
-                        .where(
+                        select(func.count(Application.id)).where(
                             Application.status == ApplicationStatus.SENT,
                             func.date(Application.created_at) == func.current_date(),
                         )
@@ -639,34 +676,37 @@ class WorkerScheduler:
                     return
 
                 # Топ-5 успешных откликов за окно (по ai_score)
-                top_rows = (await session.execute(
-                    select(Vacancy.title, Vacancy.ai_score, Application.platform)
-                    .join(Vacancy, Application.vacancy_id == Vacancy.id)
-                    .where(
-                        Application.created_at >= window_start_db,
-                        Application.status == ApplicationStatus.SENT,
+                top_rows = (
+                    await session.execute(
+                        select(Vacancy.title, Vacancy.ai_score, Application.platform)
+                        .join(Vacancy, Application.vacancy_id == Vacancy.id)
+                        .where(
+                            Application.created_at >= window_start_db,
+                            Application.status == ApplicationStatus.SENT,
+                        )
+                        .order_by(Vacancy.ai_score.desc().nullslast())
+                        .limit(5)
                     )
-                    .order_by(Vacancy.ai_score.desc().nullslast())
-                    .limit(5)
-                )).all()
+                ).all()
 
                 # Сводка по реальным ошибкам (не "limit"/"auth") — для диагностики
-                err_rows = (await session.execute(
-                    select(Application.error_message, func.count(Application.id))
-                    .where(
-                        Application.created_at >= window_start_db,
-                        Application.status == ApplicationStatus.FAILED,
-                        Application.error_message.isnot(None),
+                err_rows = (
+                    await session.execute(
+                        select(Application.error_message, func.count(Application.id))
+                        .where(
+                            Application.created_at >= window_start_db,
+                            Application.status == ApplicationStatus.FAILED,
+                            Application.error_message.isnot(None),
+                        )
+                        .group_by(Application.error_message)
+                        .order_by(func.count(Application.id).desc())
+                        .limit(3)
                     )
-                    .group_by(Application.error_message)
-                    .order_by(func.count(Application.id).desc())
-                    .limit(3)
-                )).all()
+                ).all()
 
                 # Сегодняшний общий счётчик (день в таймзоне сервера БД)
                 today_sent = await session.scalar(
-                    select(func.count(Application.id))
-                    .where(
+                    select(func.count(Application.id)).where(
                         Application.status == ApplicationStatus.SENT,
                         func.date(Application.created_at) == func.current_date(),
                     )
@@ -732,6 +772,7 @@ class WorkerScheduler:
         try:
             from app.parsers.hh_playwright import hh_playwright
             from app.workers.message_worker import process_rejection_thanks
+
             if not hh_playwright:
                 return
             count = await process_rejection_thanks(max_count=3)
@@ -756,7 +797,15 @@ class WorkerScheduler:
         log.info("auto_apply_set", enabled=enabled)
 
     # Флаги «что делает бот» для меню с галочками
-    FLAG_NAMES = ("auto_apply", "pass_tests", "notify_messages", "thank_rejections", "bump_resume", "ai_cover_letters", "humanize_letters")
+    FLAG_NAMES = (
+        "auto_apply",
+        "pass_tests",
+        "notify_messages",
+        "thank_rejections",
+        "bump_resume",
+        "ai_cover_letters",
+        "humanize_letters",
+    )
 
     def get_flags(self) -> dict:
         return {n: bool(getattr(self, n, True)) for n in self.FLAG_NAMES}
@@ -772,6 +821,11 @@ class WorkerScheduler:
         self._save_state()
         log.info("bot_limit_set", limit=self.max_applies_per_day_hh)
 
+    def set_applies_per_cycle(self, count: int):
+        self.applies_per_cycle = max(0, count)
+        self._save_state()
+        log.info("bot_cycle_target_set", count=self.applies_per_cycle)
+
     def stop(self):
         self.scheduler.shutdown()
         log.info("scheduler_stopped")
@@ -779,6 +833,7 @@ class WorkerScheduler:
     async def _append_inbox_to_summary(self, text: str) -> str:
         try:
             from app.services.inbox import collect_inbox, format_inbox, inbox_has_actions
+
             data = await collect_inbox(self)
             if inbox_has_actions(data):
                 return text + "\n\n" + format_inbox(data, heading=True)
@@ -808,6 +863,7 @@ class WorkerScheduler:
             if not statuses:
                 log.info("sync_sheets_trying_playwright_fallback")
                 from app.parsers.hh_playwright import HHPlaywright
+
                 hh = HHPlaywright()
                 statuses = await hh.check_negotiations_status()
 
@@ -820,6 +876,7 @@ class WorkerScheduler:
                 # фолбеком на company-only.
                 try:
                     from app.parsers.hh_chat import hh_chat_parser
+
                     chats = await hh_chat_parser.get_unread_or_active_chats()
                     if chats:
                         # Два индекса: точный (company+title) и по компании
@@ -841,10 +898,7 @@ class WorkerScheduler:
                         for s in statuses:
                             comp = (s.get("company") or "").lower().strip()
                             title = (s.get("title") or "").lower().strip()
-                            chat_msg = (
-                                chat_map_exact.get((comp, title))
-                                or chat_map_company.get(comp)
-                            )
+                            chat_msg = chat_map_exact.get((comp, title)) or chat_map_company.get(comp)
                             if chat_msg:
                                 s["last_message"] = chat_msg
                                 enriched += 1
@@ -871,22 +925,23 @@ class WorkerScheduler:
             self.sheets_invitations = result.invitations or sum(
                 1 for s in statuses if (s.get("tab") or "").lower() in ("invitations", "invitation")
             )
-            self.sheets_invitation_previews = result.invitation_previews or [
-                f"{(s.get('company') or '').strip()}: {(s.get('title') or '')[:50]}".strip(": ")
-                for s in statuses
-                if (s.get("tab") or "").lower() in ("invitations", "invitation")
-            ][:5]
+            self.sheets_invitation_previews = (
+                result.invitation_previews
+                or [
+                    f"{(s.get('company') or '').strip()}: {(s.get('title') or '')[:50]}".strip(": ")
+                    for s in statuses
+                    if (s.get("tab") or "").lower() in ("invitations", "invitation")
+                ][:5]
+            )
             self._save_state()
 
             if result.error:
                 await notifier.send(
-                    f"❌ <b>Google Sheets</b>: ошибка синхронизации статусов\n"
-                    f"<code>{result.error[:180]}</code>"
+                    f"❌ <b>Google Sheets</b>: ошибка синхронизации статусов\n" f"<code>{result.error[:180]}</code>"
                 )
             else:
                 await notifier.vlog(
-                    f"📑 <b>Таблица</b>: обновлено {result.updated}, "
-                    f"не найдено в таблице {result.unmatched}"
+                    f"📑 <b>Таблица</b>: обновлено {result.updated}, " f"не найдено в таблице {result.unmatched}"
                 )
             return updated_count
 
@@ -897,9 +952,8 @@ class WorkerScheduler:
             self._save_state()
             try:
                 from app.utils import notifier
-                await notifier.send(
-                    f"❌ <b>Google Sheets</b>: ошибка синхронизации\n<code>{str(e)[:180]}</code>"
-                )
+
+                await notifier.send(f"❌ <b>Google Sheets</b>: ошибка синхронизации\n<code>{str(e)[:180]}</code>")
             except Exception:
                 pass
             return 0

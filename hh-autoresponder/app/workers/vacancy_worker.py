@@ -62,6 +62,7 @@ async def run_vacancy_search():
     log.info("vacancy_search_complete", total_new=total_new)
     if total_new:
         from app.utils import notifier
+
         await notifier.vlog(f"🔍 <b>Поиск</b>: найдено новых вакансий — {total_new}")
     return total_new
 
@@ -85,15 +86,19 @@ async def _save_vacancies(parsed: list[ParsedVacancy]) -> int:
             # Дедупликация по title + company: одна вакансия в N городах
             # = N записей с разными external_id. Оставляем только первую.
             if pv.company_name and pv.title:
-                title_norm = re.sub(r'\s+', ' ', pv.title.strip().lower())
-                company_norm = re.sub(r'\s+', ' ', pv.company_name.strip().lower())
+                title_norm = re.sub(r"\s+", " ", pv.title.strip().lower())
+                company_norm = re.sub(r"\s+", " ", pv.company_name.strip().lower())
                 dup = await session.scalar(
-                    select(Vacancy.id).where(
+                    select(Vacancy.id)
+                    .where(
                         Vacancy.platform == pv.platform,
                         func.lower(func.trim(Vacancy.title)) == title_norm,
-                    ).join(Company, Vacancy.company_id == Company.id).where(
+                    )
+                    .join(Company, Vacancy.company_id == Company.id)
+                    .where(
                         func.lower(func.trim(Company.name)) == company_norm,
-                    ).limit(1)
+                    )
+                    .limit(1)
                 )
                 if dup:
                     log.debug("dedup_title_company", title=pv.title[:60], company=pv.company_name[:40])
@@ -174,34 +179,77 @@ def _is_blacklisted(pv: ParsedVacancy, blacklist: dict[str, set[str]]) -> bool:
     return False
 
 
+DISALLOWED_CITIES = [
+    "новосибирск",
+    "санкт-петербург",
+    "питер",
+    "спб",
+    "екатеринбург",
+    "казан",
+    "нижний новгород",
+    "самара",
+    "ростов",
+    "уфа",
+    "красноярск",
+    "воронеж",
+    "пермь",
+    "волгоград",
+    "краснодар",
+    "тюмень",
+    "тольятти",
+    "томск",
+    "омск",
+    "челябинск",
+    "иркутск",
+    "владивосток",
+    "саратов",
+    "хабаровск",
+    "ярославл",
+]
+
+
 def _is_geo_allowed(pv: ParsedVacancy) -> bool:
     """Фильтр по геолокации.
 
     Правила:
     - Если geo_filter_enabled=False — пропускаем все.
-    - Если вакансия полностью удалённая (is_remote=True или слово удалён / remote в location) — пропускаем.
-    - Если location пустой — пропускаем (нет данных — риск отсека нужной вакансии).
-    - Иначе location должно содержать хотя бы одну из allowed_regions.
+    - Если вакансия полностью удалённая (is_remote=True или слово удалён / remote в location) —
+      пропускаем, кроме случаев явного требования офиса в чужом городе.
+    - Проверяем заголовок и location на чужие города (Новосибирск, СПб и др.).
+    - Иначе location должно содержать хотя бы одну из allowed_regions (Москва/МО и др.).
     """
     if not settings.geo_filter_enabled:
         return True
 
     loc = (pv.location or "").lower()
+    title = (pv.title or "").lower()
 
-    # Полная удалёнка — принимаем всегда
+    has_allowed_region = any(region.lower() in loc or region.lower() in title for region in settings.allowed_regions)
+
+    has_disallowed_city = any(city in title or city in loc for city in DISALLOWED_CITIES)
+
+    # Если указан чужой город и нет разрешённого региона (Москва/МО):
+    if has_disallowed_city and not has_allowed_region:
+        if "офис" in title or "гибрид" in title:
+            return False
+        if not pv.is_remote and not any(r in loc for r in ("удалён", "удален", "remote")):
+            return False
+
+    # Полная удалёнка — принимаем
     if pv.is_remote:
         return True
     if "удалён" in loc or "удален" in loc or "remote" in loc:
         return True
 
-    # Пустой location — не отсеиваем
+    # Пустой location — отсекаем, если в заголовке чужой город
     if not loc:
+        if has_disallowed_city and not has_allowed_region:
+            return False
         return True
 
     # Проверяем разрешённые регионы
-    for region in settings.allowed_regions:
-        if region.lower() in loc:
-            return True
+    if has_allowed_region:
+        return True
 
     return False
 
@@ -217,10 +265,7 @@ async def run_vacancy_analysis():
 
     async with async_session() as session:
         result = await session.execute(
-            select(Vacancy)
-            .where(Vacancy.status == VacancyStatus.NEW)
-            .order_by(Vacancy.created_at.desc())
-            .limit(300)
+            select(Vacancy).where(Vacancy.status == VacancyStatus.NEW).order_by(Vacancy.created_at.desc()).limit(300)
         )
         vacancies = result.scalars().all()
 
@@ -336,6 +381,7 @@ async def run_vacancy_analysis():
     log.info("vacancy_analysis_complete", analyzed=analyzed, desc_loaded=desc_loaded)
     if analyzed:
         from app.utils import notifier
+
         lines = [f"🧠 <b>Анализ</b>: оценено вакансий — {analyzed} (описаний загружено: {desc_loaded})"]
         for title, sc in sorted(scored, key=lambda x: -x[1])[:8]:
             lines.append(f"  • {sc} — {title[:55]}")

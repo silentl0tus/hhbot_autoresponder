@@ -119,3 +119,85 @@ class TestArchivedEnrichmentFilter:
             is_archived=False,
         )
         assert getattr(details, "is_archived", False) is False
+
+    @pytest.mark.asyncio
+    async def test_html_with_translation_script_not_archived(self):
+        """Active vacancy with translation dictionary in <script> must NOT be marked archived."""
+        from app.parsers.hh import HHParser
+
+        html_content = """
+        <html>
+            <head>
+                <script>
+                    window.translations = {"applicant.negotiations.vacancyArchived": "Вакансия в архиве"};
+                </script>
+            </head>
+            <body>
+                <h1 data-qa="vacancy-title">QA Engineer</h1>
+                <div data-qa="vacancy-description">Testing python apps</div>
+                <span data-qa="vacancy-company-name">Tech Corp</span>
+            </body>
+        </html>
+        """
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = html_content
+        mock_resp.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        # Force API to fail (return 403) so it uses HTML fallback
+        mock_api_resp = MagicMock()
+        mock_api_resp.status_code = 403
+
+        with (
+            patch("app.parsers.hh_oauth.hh_oauth.get_token", new_callable=AsyncMock, return_value="tok"),
+            patch("app.parsers.hh.httpx.AsyncClient", return_value=mock_client),
+        ):
+            # API call returns 403, fallback call returns html_content
+            mock_client.get.side_effect = [mock_api_resp, mock_resp]
+            parser = HHParser()
+            result = await parser.get_vacancy_details("https://hh.ru/vacancy/55555")
+
+        assert result is not None
+        assert result.title == "QA Engineer"
+        assert result.is_archived is False
+
+    @pytest.mark.asyncio
+    async def test_html_with_real_archive_banner_is_archived(self):
+        """Page with real archive header must be marked archived."""
+        from app.parsers.hh import HHParser
+
+        html_content = """
+        <html>
+            <body>
+                <div data-qa="vacancy-archive-header">Вакансия в архиве</div>
+                <div data-qa="vacancy-description">Old desc</div>
+            </body>
+        </html>
+        """
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = html_content
+        mock_resp.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        mock_api_resp = MagicMock()
+        mock_api_resp.status_code = 403
+
+        with (
+            patch("app.parsers.hh_oauth.hh_oauth.get_token", new_callable=AsyncMock, return_value="tok"),
+            patch("app.parsers.hh.httpx.AsyncClient", return_value=mock_client),
+        ):
+            mock_client.get.side_effect = [mock_api_resp, mock_resp]
+            parser = HHParser()
+            result = await parser.get_vacancy_details("https://hh.ru/vacancy/55555")
+
+        assert result is not None
+        assert result.is_archived is True

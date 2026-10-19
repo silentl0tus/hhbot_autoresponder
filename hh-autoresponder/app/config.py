@@ -33,26 +33,26 @@ class Settings(BaseSettings):
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
     # ── Telegram ──────────────────────────────────────────────
-    tg_bot_token: str = ""            # токен бота из @BotFather
-    tg_admin_chat_id: str = ""        # твой numeric id из @userinfobot
+    tg_bot_token: str = ""  # токен бота из @BotFather
+    tg_admin_chat_id: str = ""  # твой numeric id из @userinfobot
     tg_api_server: str = ""
-    tg_proxy: str = ""                # socks5://user:pass@host:port (опц.)
+    tg_proxy: str = ""  # socks5://user:pass@host:port (опц.)
 
     # ── LLM (опционально: только для прохождения тестов работодателя) ──
     ai_enabled: bool = False
     humanize_letters: bool = False
-    llm_base_url: str = "https://openrouter.ai/api/v1"   # OpenAI-совместимый эндпоинт
+    llm_base_url: str = "https://openrouter.ai/api/v1"  # OpenAI-совместимый эндпоинт
     llm_api_key: str = ""
     gemini_api_key: str = ""
     openrouter_api_key: str = ""
     llm_model: str = "openrouter/auto"
     llm_max_tokens_floor: int = 2000
-    llm_proxy: str = ""                                 # socks5:// или http:// прокси для LLM (опц.)
+    llm_proxy: str = ""  # socks5:// или http:// прокси для LLM (опц.)
 
     # ── hh.ru ─────────────────────────────────────────────────
     hh_login: str = ""
     hh_password: str = ""
-    hh_resume_id: str = ""            # id резюме (подставится автоматически при первом входе)
+    hh_resume_id: str = ""  # id резюме (подставится автоматически при первом входе)
 
     # ── Google Таблицы (опционально) ──────────────────────────
     google_sheet_url: str = ""
@@ -69,13 +69,17 @@ class Settings(BaseSettings):
 
     # ── Скоринг вакансий (всё через запятую) ──────────────────
     # target_keywords — если ХОТЯ БЫ одно слово есть в заголовке, вакансия подходит.
-    target_keywords_raw: str = "маркетолог, marketing, performance, трафик, seo, smm, директолог, таргетолог, ppc, digital"
+    target_keywords_raw: str = (
+        "маркетолог, marketing, performance, трафик, seo, smm, директолог, таргетолог, ppc, digital"
+    )
     # negative_keywords — если слово есть в заголовке, вакансия отсеивается сразу.
     negative_keywords_raw: str = "junior, стажёр, стажер, intern, ассистент, помощник, продавец, менеджер по продажам"
     # stack_keywords — каждое совпадение в тексте добавляет баллы (бонус).
-    stack_keywords_raw: str = "performance, cpa, roi, drr, seo, smm, таргет, контекст, директ, google ads, аналитика, воронк, unit"
-    salary_floor: int = 100000       # вакансии с указанной ЗП ниже — отсеиваем
-    score_threshold: int = 30        # мин. балл score, ниже — отклик не отправляется (0 = откликаться на всё)
+    stack_keywords_raw: str = (
+        "performance, cpa, roi, drr, seo, smm, таргет, контекст, директ, google ads, аналитика, воронк, unit"
+    )
+    salary_floor: int = 100000  # вакансии с указанной ЗП ниже — отсеиваем
+    score_threshold: int = 30  # мин. балл score, ниже — отклик не отправляется (0 = откликаться на всё)
 
     # ── Гео-фильтр ─────────────────────────────────────────────
     # GEO_FILTER_ENABLED=true — отсеивать вакансии вне допустимых регионов
@@ -87,10 +91,7 @@ class Settings(BaseSettings):
     skip_if_no_cover_letter: bool = False
 
     # ── Сопроводительное письмо (одно на всех) ────────────────
-    cover_letter: str = (
-        "Добрый день! Заинтересовала ваша вакансия, у меня релевантный опыт, "
-        "буду рад пообщаться."
-    )
+    cover_letter: str = "Добрый день! Заинтересовала ваша вакансия, у меня релевантный опыт, " "буду рад пообщаться."
 
     @field_validator("cover_letter", mode="before")
     @classmethod
@@ -105,7 +106,9 @@ class Settings(BaseSettings):
         if self.llm_api_key:
             if self.llm_api_key.startswith("sk-or-") and not self.openrouter_api_key:
                 self.openrouter_api_key = self.llm_api_key
-            elif (self.llm_api_key.startswith("AIza") or self.llm_api_key.startswith("AQ.")) and not self.gemini_api_key:
+            elif (
+                self.llm_api_key.startswith("AIza") or self.llm_api_key.startswith("AQ.")
+            ) and not self.gemini_api_key:
                 self.gemini_api_key = self.llm_api_key
         # Для OpenRouter по умолчанию используем умный авто-рутер
         if "openrouter" in self.llm_base_url:
@@ -119,27 +122,30 @@ class Settings(BaseSettings):
     proxy_url: str = ""
     min_delay_sec: int = 3
     max_delay_sec: int = 12
-    apply_delay_min: int = 40         # пауза между откликами, сек (низ)
-    apply_delay_max: int = 68         # пауза между откликами, сек (верх)
+    apply_delay_min: int = 40  # пауза между откликами, сек (низ)
+    apply_delay_max: int = 68  # пауза между откликами, сек (верх)
     type_delay_min: int = 30
     type_delay_max: int = 120
     max_applies_per_day_hh_min: int = 20  # 20 — низ лимита
     max_applies_per_day_hh_max: int = 35  # 35 — верх лимита
-    
+
     # Хабр Карьера
     habr_login: str = ""
     habr_password: str = ""
     max_applies_per_day_habr_min: int = 5
     max_applies_per_day_habr_max: int = 15
 
+    # Цикл откликов (целевое количество успешных откликов за один прогон, 0 = до дневного лимита)
+    applies_per_cycle: int = 10
+
     # ── База ──────────────────────────────────────────────────
     database_url: str = "sqlite+aiosqlite:///data/jobhunter.db"
 
     # ── Уведомления (тихие часы, МСК) ─────────────────────────
     notify_hour_start: int = 9
-    notify_hour_end: int = 22           # нижняя граница конца рабочего дня
-    notify_hour_end_max: int = 23       # верхняя граница конца рабочего дня (рандомизируется каждый день)
-    notify_minute_end_max: int = 40     # максимальная минута при notify_hour_end_max (до 23:40)
+    notify_hour_end: int = 22  # нижняя граница конца рабочего дня
+    notify_hour_end_max: int = 23  # верхняя граница конца рабочего дня (рандомизируется каждый день)
+    notify_minute_end_max: int = 40  # максимальная минута при notify_hour_end_max (до 23:40)
 
     # ── Производные значения ──────────────────────────────────
     @property

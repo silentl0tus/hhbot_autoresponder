@@ -1847,10 +1847,8 @@ async def cmd_test_apply(message: Message, **kw):
         await message.answer("❌ Нет одобренных вакансий hh для теста")
         return
 
-    from app.parsers.hh_oauth import hh_oauth
     from app.ai.claude import claude_ai
     import asyncio as _async
-    import re as _re
     from app.utils.anti_detect import random_delay
     from app.models.application import Application, ApplicationStatus
 
@@ -1861,10 +1859,13 @@ async def cmd_test_apply(message: Message, **kw):
     if marked:
         await message.answer(f"🔄 Помечено уже-откликнутых: {marked}. Беру новые.")
 
-    # Verify OAuth token works
-    token = await hh_oauth.get_token()
-    if not token:
-        await message.answer("❌ Не удалось получить OAuth токен. Нужен VNC-логин в hh.")
+    from app.parsers.hh import HHParser
+
+    pw_parser = HHParser()
+    try:
+        await _async.wait_for(pw_parser.login(), timeout=60)
+    except Exception as e:
+        await message.answer(f"❌ Ошибка входа Playwright в hh.ru: {e}")
         return
 
     stats = {"sent": 0, "already": 0, "failed": 0}
@@ -1883,34 +1884,18 @@ async def cmd_test_apply(message: Message, **kw):
             stats["failed"] += 1
             continue
 
-        m_id = _re.search(r"/vacancy/(\d+)", v.url)
-        vid = m_id.group(1) if m_id else v.external_id
         try:
-            res, info = await _async.wait_for(hh_oauth.apply(vid, letter), timeout=20)
+            res = await _async.wait_for(
+                pw_parser.apply_to_vacancy(v.url, letter, screenshot_name=tag),
+                timeout=300,
+            )
+            info = {"path": "playwright", "result": str(res)}
         except _async.TimeoutError:
-            res, info = False, {"error": "timeout"}
-
-        # Fallback to Playwright for vacancies requiring questionnaire
-        if res is False and (info or {}).get("error") == "needs_test":
-            await message.answer(f"📋 <b>[{tag}]</b> Опросник — переключаюсь на Playwright…", parse_mode="HTML")
-            try:
-                humanize = _scheduler.humanize_letters if _scheduler else False
-                ai_letter, _, _ = await claude_ai.generate_cover_letter(v.title, v.description or "", humanize=humanize)
-            except Exception:
-                ai_letter = letter
-            from app.parsers.hh import HHParser
-
-            pw_parser = HHParser()
-            try:
-                await _async.wait_for(pw_parser.login(), timeout=60)
-                res = await _async.wait_for(
-                    pw_parser.apply_to_vacancy(v.url, ai_letter, screenshot_name=tag),
-                    timeout=300,
-                )
-                info = {"path": "playwright", "result": str(res)}
-            except _async.TimeoutError:
-                res = False
-                info = {"error": "playwright_timeout"}
+            res = False
+            info = {"error": "playwright_timeout"}
+        except Exception as e:
+            res = False
+            info = {"error": str(e)}
 
         status_emoji = "✅" if res is True else ("ℹ️" if res == "already" else "❌")
         result_label = {True: "ОТПРАВЛЕНО", "already": "Уже откликались", False: "ОШИБКА"}.get(res, "ОШИБКА")

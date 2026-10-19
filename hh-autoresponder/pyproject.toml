@@ -36,3 +36,6 @@ where = ["."]
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+
+[tool.ruff.lint]
+ignore = ["EXE002"]

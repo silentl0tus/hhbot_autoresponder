@@ -1,5 +1,4 @@
 import asyncio
-import re
 import structlog
 from sqlalchemy import select, func, case
 from sqlalchemy.orm import joinedload
@@ -19,6 +18,7 @@ async def sync_applied_from_hh() -> int:
     """Fetch list of vacancies already applied to on hh.ru via API and
     mark them as APPLIED in DB so the bot doesn't waste time re-applying."""
     from app.parsers.hh_api import hh_api_client
+
     try:
         ids = await asyncio.wait_for(hh_api_client.fetch_applied_vacancy_ids(), timeout=30)
     except asyncio.TimeoutError:
@@ -44,8 +44,8 @@ async def sync_applied_from_hh() -> int:
     return marked
 
 
-async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
-    log.info("auto_apply_started", auto_mode=auto_mode, min_score=min_score)
+async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_count: int | None = None):
+    log.info("auto_apply_started", auto_mode=auto_mode, min_score=min_score, target_count=target_count)
 
     # Платформы на паузе (из scheduler_state.json) — для них пропускаем
     # выборку. Объединяем auto-pause (login_health) и manual-pause (юзер).
@@ -55,9 +55,12 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
     humanize_letters = False
     limit_hh_dynamic = settings.max_applies_per_day_hh_max
     limit_habr_dynamic = settings.max_applies_per_day_habr_max
+    cycle_target = target_count if target_count is not None else settings.applies_per_cycle
+
     try:
         import json as _json
         from pathlib import Path as _Path
+
         _sf = _Path("data/scheduler_state.json")
         if _sf.exists():
             _st = _json.loads(_sf.read_text())
@@ -68,6 +71,8 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
             humanize_letters = _st.get("humanize_letters", False)
             limit_hh_dynamic = _st.get("max_applies_per_day_hh", settings.max_applies_per_day_hh_max)
             limit_habr_dynamic = _st.get("max_applies_per_day_habr", settings.max_applies_per_day_habr_max)
+            if target_count is None:
+                cycle_target = _st.get("applies_per_cycle", settings.applies_per_cycle)
     except Exception as e:
         log.warning("read_paused_platforms_error", error=str(e))
 
@@ -88,10 +93,11 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
     #  score=0 (дисквалифицированные 1С/junior/qa/не-аналитик) не берём никогда.
     from datetime import datetime as _dt
     from zoneinfo import ZoneInfo as _ZI
+
     _hour = _dt.now(_ZI("Europe/Moscow")).hour
     _is_daytime = 9 <= _hour < 22
     effective_min_score = 1 if _is_daytime else 50
-    log.info("apply_window", daytime=_is_daytime, min_score=effective_min_score)
+    log.info("apply_window", daytime=_is_daytime, min_score=effective_min_score, target=cycle_target)
 
     # Дневной лимит (hh и habr)
     platform_caps = {
@@ -103,88 +109,61 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
         if p in paused_platforms:
             log.info("apply_skip_paused_platform", platform=p)
             del platform_caps[p]
-    async with async_session() as session:
-        today_rows = (await session.execute(
-            select(Application.platform, func.count(Application.id))
-            .where(
-                Application.status == ApplicationStatus.SENT,
-                func.date(Application.created_at) == func.current_date(),
-            )
-            .group_by(Application.platform)
-        )).all()
-        today_by_plat = {p: c for p, c in today_rows}
 
-        remaining_by_plat: dict[str, int] = {}
-        for plat, cap in platform_caps.items():
-            done = today_by_plat.get(plat, 0)
-            left = max(0, cap - done)
-            if left > 0:
-                remaining_by_plat[plat] = left
+    from app.parsers.letter_template import render_letter
+    from app.utils import notifier
+    from sqlalchemy import select as _select
 
-        if not remaining_by_plat:
-            log.info("daily_limit_reached", today=today_by_plat)
-            return 0
-
-        # Берём одобренные вакансии по платформам с лимитом per-platform
-        # Исключаем те, что уже падали 3+ раз (бессмысленно ретраить)
-        from sqlalchemy import select as _select
-        failed_3plus = _select(Application.vacancy_id).where(
+    # Исключаем те, что уже падали 3+ раз (бессмысленно ретраить)
+    failed_3plus = (
+        _select(Application.vacancy_id)
+        .where(
             Application.status == ApplicationStatus.FAILED,
-        ).group_by(Application.vacancy_id).having(func.count(Application.id) >= 3)
-
-        # Приоритет формата: удалёнка (0) → гибрид (1) → офис/прочее (2).
-        # Внутри формата — по убыванию score. Так сначала отрабатываем удалёнку.
-        fmt_priority = case(
-            (Vacancy.work_format == "remote", 0),
-            (Vacancy.work_format == "hybrid", 1),
-            else_=2,
         )
-        all_vacs = []
-        for plat, limit in remaining_by_plat.items():
-            result = await session.execute(
-                select(Vacancy)
-                .options(joinedload(Vacancy.company))
-                .where(
-                    Vacancy.platform == plat,
+        .group_by(Application.vacancy_id)
+        .having(func.count(Application.id) >= 3)
+    )
+
+    # Приоритет формата: удалёнка (0) → гибрид (1) → офис/прочее (2).
+    # Внутри формата — по убыванию score. Так сначала отрабатываем удалёнку.
+    fmt_priority = case(
+        (Vacancy.work_format == "remote", 0),
+        (Vacancy.work_format == "hybrid", 1),
+        else_=2,
+    )
+
+    async with async_session() as session:
+        queue_count = (
+            await session.execute(
+                select(func.count(Vacancy.id)).where(
+                    Vacancy.platform.in_(list(platform_caps.keys())),
                     Vacancy.status == VacancyStatus.APPROVED,
                     Vacancy.ai_score >= effective_min_score,
                     Vacancy.id.notin_(failed_3plus),
                 )
-                .order_by(fmt_priority, Vacancy.ai_score.desc())
-                .limit(limit)
             )
-            all_vacs.extend(result.scalars().all())
-        # Mix platforms a bit: interleave
-        vacancies = all_vacs
+        ).scalar() or 0
 
-    # Письмо собирается из шаблона с вариациями (render_letter) под каждую
-    # вакансию: каждое письмо чуть разное и упоминает название. Токены не
-    # тратятся. AI-письмо включается только в Playwright-fallback для вакансий
-    # с обязательным тестом/анкетой.
-    from app.parsers.letter_template import render_letter
-    STATIC_LETTER = render_letter()  # запасной вариант без названия
+    target_desc = f"цель: {cycle_target}" if cycle_target > 0 else "цель: до дневного лимита"
+    await notifier.vlog(
+        f"🚀 <b>Цикл откликов</b> ({target_desc}): в очереди {queue_count} " f"(порог score ≥ {effective_min_score})"
+    )
 
-    # Глобальные ошибки (daily_limit, истёкший токен, нет резюме) одинаково
-    # бьют по всем вакансиям платформы — нет смысла ретраить и засорять БД
-    # фейлами. Прерываем платформу до следующего запуска.
     aborted_platforms: set[str] = set()
     GLOBAL_ERRORS = {"daily_limit", "auth_required", "auth_expired", "no_oauth_token", "no_resume_id"}
+    attempted_vacancy_ids: set[int] = set()
+    replenish_searches_left = 1 if auto_mode else 0
 
-    from app.utils import notifier
-    if vacancies:
-        await notifier.vlog(
-            f"🚀 <b>Цикл откликов</b>: в очереди {len(vacancies)} "
-            f"(порог score ≥ {effective_min_score})"
-        )
-
-    for vacancy in vacancies:
-        if vacancy.platform in aborted_platforms:
-            continue
+    while True:
+        if cycle_target > 0 and applied >= cycle_target:
+            log.info("auto_apply_cycle_target_reached", applied=applied, target=cycle_target)
+            break
 
         # Dynamic mid-cycle check for pause and limits
         try:
             import json as _json
             from pathlib import Path as _Path
+
             _sf = _Path("data/scheduler_state.json")
             if _sf.exists():
                 _st = _json.loads(_sf.read_text())
@@ -194,29 +173,19 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
                 if not _st.get("auto_apply", False) and auto_mode:
                     log.info("auto_apply_disabled_mid_cycle")
                     break
-                
-                # Check if this platform was paused manually
-                paused_plats = set(_st.get("paused_platforms", [])) | set(_st.get("manual_paused_platforms", []))
-                if vacancy.platform in paused_plats:
-                    aborted_platforms.add(vacancy.platform)
-                    continue
 
-                # Check dynamic limit
-                plat_limit = _st.get(f"max_applies_per_day_{vacancy.platform}", 999)
-                async with async_session() as session:
-                    today_cnt = (await session.execute(
-                        select(func.count(Application.id))
-                        .where(
-                            Application.status == ApplicationStatus.SENT,
-                            Application.platform == vacancy.platform,
-                            func.date(Application.created_at) == func.current_date()
-                        )
-                    )).scalar() or 0
-                if today_cnt >= plat_limit:
-                    log.info("daily_limit_reached_mid_cycle", platform=vacancy.platform)
-                    aborted_platforms.add(vacancy.platform)
-                    continue
-                
+                # Check if platforms were paused manually
+                paused_plats = set(_st.get("paused_platforms", [])) | set(_st.get("manual_paused_platforms", []))
+                paused_platforms.update(paused_plats)
+
+                # Update dynamic limit
+                platform_caps["hh"] = _st.get(
+                    "max_applies_per_day_hh", platform_caps.get("hh", settings.max_applies_per_day_hh_max)
+                )
+                platform_caps["habr"] = _st.get(
+                    "max_applies_per_day_habr", platform_caps.get("habr", settings.max_applies_per_day_habr_max)
+                )
+
                 # Update AI flags
                 humanize_letters = _st.get("humanize_letters", False)
                 ai_cover_letters = _st.get("ai_cover_letters", False)
@@ -224,30 +193,96 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
         except Exception:
             pass
 
+        # Check daily limits per platform
+        async with async_session() as session:
+            today_rows = (
+                await session.execute(
+                    select(Application.platform, func.count(Application.id))
+                    .where(
+                        Application.status == ApplicationStatus.SENT,
+                        func.date(Application.created_at) == func.current_date(),
+                    )
+                    .group_by(Application.platform)
+                )
+            ).all()
+            today_by_plat = {p: c for p, c in today_rows}
+
+            remaining_by_plat: dict[str, int] = {}
+            for plat, cap in platform_caps.items():
+                if plat in paused_platforms or plat in aborted_platforms:
+                    continue
+                left = max(0, cap - today_by_plat.get(plat, 0))
+                if left > 0:
+                    remaining_by_plat[plat] = left
+
+        if not remaining_by_plat:
+            log.info("daily_limit_reached", today=today_by_plat)
+            break
+
+        # Select next best approved vacancy
+        async with async_session() as session:
+            query = (
+                select(Vacancy)
+                .options(joinedload(Vacancy.company))
+                .where(
+                    Vacancy.platform.in_(list(remaining_by_plat.keys())),
+                    Vacancy.status == VacancyStatus.APPROVED,
+                    Vacancy.ai_score >= effective_min_score,
+                    Vacancy.id.notin_(failed_3plus),
+                )
+            )
+            if attempted_vacancy_ids:
+                query = query.where(Vacancy.id.notin_(attempted_vacancy_ids))
+            query = query.order_by(fmt_priority, Vacancy.ai_score.desc()).limit(1)
+            vacancy = (await session.execute(query)).scalar_one_or_none()
+
+        if not vacancy:
+            if replenish_searches_left > 0:
+                replenish_searches_left -= 1
+                log.info("queue_empty_running_replenish")
+                await notifier.vlog("🔍 В очереди закончились одобренные вакансии. Запускаю поиск и анализ...")
+                try:
+                    from app.workers.vacancy_worker import run_vacancy_search, run_vacancy_analysis
+
+                    await run_vacancy_search()
+                    await run_vacancy_analysis()
+                except Exception as e:
+                    log.error("replenish_search_error", error=str(e))
+                continue
+            else:
+                log.info("no_more_approved_vacancies_available")
+                break
+
+        attempted_vacancy_ids.add(vacancy.id)
+
         try:
             letter = None
             letter_box = {"text": ""}
             async with async_session() as session:
-                prev_app = (await session.execute(
-                    select(Application)
-                    .where(Application.vacancy_id == vacancy.id)
-                    .order_by(Application.created_at.desc())
-                    .limit(1)
-                )).scalar_one_or_none()
+                prev_app = (
+                    await session.execute(
+                        select(Application)
+                        .where(Application.vacancy_id == vacancy.id)
+                        .order_by(Application.created_at.desc())
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
                 if prev_app and prev_app.cover_letter:
                     letter = prev_app.cover_letter
 
             if not letter:
+
                 async def generate_letter():
                     if ai_cover_letters and settings.ai_enabled and settings.llm_api_key:
                         from app.ai.claude import claude_ai
+
                         claude_ai.last_error = None
                         cname = vacancy.company.name if vacancy.company else ""
                         ai_letter, _, _ = await claude_ai.generate_cover_letter(
                             vacancy_title=vacancy.title,
                             vacancy_description=vacancy.description or "",
                             company_name=cname,
-                            humanize=humanize_letters
+                            humanize=humanize_letters,
                         )
                         letter_box["text"] = ai_letter
                         return ai_letter
@@ -255,6 +290,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
                         text = render_letter(vacancy.title)
                         letter_box["text"] = text
                         return text
+
                 letter = generate_letter
 
             # HH через Playwright (эмуляция браузера для обхода блокировок API)
@@ -269,7 +305,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
                         timeout=300,
                     )
                     result = res
-                    
+
                     if res is not True and res != "already":
                         if res in GLOBAL_ERRORS:
                             log.warning(
@@ -287,6 +323,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
                     result = False
             elif vacancy.platform == "habr":
                 from app.parsers.habr import HabrParser
+
                 parser = HabrParser()
                 try:
                     result = await asyncio.wait_for(
@@ -296,20 +333,19 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
                 except asyncio.TimeoutError:
                     log.error("habr_apply_timeout", vacancy_id=vacancy.id)
                     result = False
-                    
+
             if skip_record:
                 # Глобальная ошибка платформы — не пишем фейк-FAILED, идём дальше.
-                # Цикл пропустит остальные вакансии этой платформы через aborted_platforms.
                 continue
 
             success = result is True  # True != "already"
             already = result == "already"
 
             # Записываем результат
+            final_letter = letter_box["text"] if callable(letter) else letter
             async with async_session() as session:
                 if not already:
                     # Don't log application if already applied
-                    final_letter = letter_box["text"] if callable(letter) else letter
                     app = Application(
                         vacancy_id=vacancy.id,
                         platform=vacancy.platform,
@@ -326,12 +362,13 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
                 elif already:
                     v.status = VacancyStatus.APPLIED
                 await session.commit()
-                
+
                 # Fetch date formatting
                 from datetime import datetime
                 from zoneinfo import ZoneInfo
+
                 date_str = datetime.now(ZoneInfo("Europe/Moscow")).strftime("%Y-%m-%d %H:%M:%S")
-                
+
                 # Append to Google Sheets if it's a new application attempt (not already applied)
                 if not already:
                     company_name = vacancy.company.name if vacancy.company else ""
@@ -342,7 +379,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
                         salary_str = f"от {vacancy.salary_from} {vacancy.salary_currency}"
                     elif vacancy.salary_to:
                         salary_str = f"до {vacancy.salary_to} {vacancy.salary_currency}"
-                        
+
                     await append_application(
                         date_str=date_str,
                         title=vacancy.title or "",
@@ -361,19 +398,22 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
                 vacancy_id=vacancy.id,
                 platform=vacancy.platform,
                 success=success,
+                applied_so_far=applied,
+                target=cycle_target,
             )
 
             # Детальный лог отклика в Telegram
             _plat_label = {"hh": "hh.ru", "habr": "Хабр Карьера"}.get(vacancy.platform, vacancy.platform)
             if success:
-                _emoji, _word = "✅", "Отклик отправлен"
+                _prog = f" [{applied}/{cycle_target}]" if cycle_target > 0 else f" [#{applied}]"
+                _emoji, _word = "✅", f"Отклик отправлен{_prog}"
             elif already:
                 _emoji, _word = "↩️", "Уже откликались"
             else:
                 _emoji, _word = "❌", "Не удалось откликнуться"
                 if isinstance(result, str) and result.startswith("error:"):
                     _word += f" ({result[6:].strip()})"
-                    
+
             _score_str = f"{int(vacancy.ai_score)}%" if vacancy.ai_score is not None else "—"
             await notifier.vlog(
                 f"{_emoji} <b>{_word}</b> · {_plat_label} · score {_score_str}\n"
@@ -381,25 +421,29 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70):
                 f"{vacancy.url}"
             )
 
-            # Пауза между откликами (антибан), из настроек.
-            await random_delay(settings.apply_delay_min, settings.apply_delay_max)
+            # Пауза между откликами (антибан) только если цикл продолжается
+            if cycle_target <= 0 or applied < cycle_target:
+                if success:
+                    await random_delay(settings.apply_delay_min, settings.apply_delay_max)
+                else:
+                    await random_delay(settings.min_delay_sec, settings.max_delay_sec)
 
         except Exception as e:
             log.error("apply_error", vacancy_id=vacancy.id, error=str(e))
-            await notifier.vlog(
-                f"❌ <b>Ошибка отклика</b>: {(vacancy.title or '')[:70]}\n{str(e)[:120]}"
-            )
+            await notifier.vlog(f"❌ <b>Ошибка отклика</b>: {(vacancy.title or '')[:70]}\n{str(e)[:120]}")
             async with async_session() as session:
-                session.add(Application(
-                    vacancy_id=vacancy.id,
-                    platform=vacancy.platform,
-                    status=ApplicationStatus.FAILED,
-                    error_message=str(e),
-                    attempt_count=1,
-                ))
+                session.add(
+                    Application(
+                        vacancy_id=vacancy.id,
+                        platform=vacancy.platform,
+                        status=ApplicationStatus.FAILED,
+                        error_message=str(e),
+                        attempt_count=1,
+                    )
+                )
                 await session.commit()
+            await random_delay(settings.min_delay_sec, settings.max_delay_sec)
 
-    log.info("auto_apply_complete", applied=applied)
-    if vacancies:
-        await notifier.vlog(f"🏁 <b>Цикл откликов завершён</b>: отправлено {applied}")
+    log.info("auto_apply_complete", applied=applied, target=cycle_target)
+    await notifier.vlog(f"🏁 <b>Цикл откликов завершён</b>: успешно отправлено {applied}")
     return applied

@@ -142,13 +142,15 @@ class HHParser:
     async def get_vacancy_details(self, url: str) -> ParsedVacancy | None:
         import re
         import html
+
         m = re.search(r"/vacancy/(\d+)", url)
         vacancy_id = m.group(1) if m else url.rstrip("/").split("/")[-1].split("?")[0]
-        
+
         # 1. Сначала пробуем быстрый и надежный официальный API hh.ru
         if vacancy_id.isdigit():
             try:
                 from app.parsers.hh_oauth import hh_oauth, UA
+
                 token = await hh_oauth.get_token()
                 headers = {"User-Agent": UA}
                 if token:
@@ -168,7 +170,7 @@ class HHParser:
                         skills = [s.get("name", "") for s in data.get("key_skills", []) if s.get("name")]
                         emp = data.get("employer", {}) or {}
                         company_name = emp.get("name", "")
-                        
+
                         return ParsedVacancy(
                             platform="hh",
                             external_id=vacancy_id,
@@ -213,8 +215,22 @@ class HHParser:
             company = company_el.get_text(strip=True) if company_el else ""
 
             is_archived = False
-            if "вакансия в архиве" in resp.text.lower():
+            # Проверяем реальные элементы архива в DOM (не ищем в raw HTML, где в скриптах лежит весь словарь)
+            archive_banner = soup.select_one(
+                '[data-qa="vacancy-archive-header"], [data-qa="vacancy-archived"], .vacancy-archive'
+            )
+            if archive_banner:
                 is_archived = True
+            elif not title_el:
+                # Если заголовок не найден на странице, проверяем видимый текст на закрытие вакансии
+                body = soup.find("body") or soup
+                for tag in body(["script", "style", "template"]):
+                    tag.decompose()
+                visible_text = body.get_text(separator=" ", strip=True).lower()
+                if "вакансия в архиве" in visible_text or "вакансия закрыта" in visible_text:
+                    is_archived = True
+
+            if is_archived:
                 log.info("hh_vacancy_archived_html", vacancy_id=vacancy_id, url=url)
 
             return ParsedVacancy(
@@ -234,7 +250,9 @@ class HHParser:
             log.error("hh_details_error", url=url, error=str(e))
             return None
 
-    async def apply_to_vacancy(self, url: str, cover_letter: str | typing.Callable, screenshot_name: str | None = None) -> bool | str:
+    async def apply_to_vacancy(
+        self, url: str, cover_letter: str | typing.Callable, screenshot_name: str | None = None
+    ) -> bool | str:
         """Apply via Playwright if available, otherwise skip."""
         pw = self._get_playwright()
         if pw:
@@ -257,15 +275,11 @@ class HHParser:
             return await pw.check_negotiations_status()
         return []
 
-    async def login(self) -> bool:
-        """Always returns True — search works via HTML scraping without login.
-        Playwright login is only needed for apply/messages and is called there."""
-        return True
-
     def _get_playwright(self):
         """Get HHPlaywright instance if available."""
         try:
             from app.parsers.hh_playwright import hh_playwright
+
             return hh_playwright
         except ImportError:
             return None
