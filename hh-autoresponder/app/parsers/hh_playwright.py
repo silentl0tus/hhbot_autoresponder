@@ -467,8 +467,8 @@ class HHPlaywright:
                     success = True
                     break
 
-                # Dismiss informational modals that appear after successful apply
-                # (e.g. "Чтобы видеть работу у дома" asking for city/district)
+                # Dismiss informational / survey modals that appear after successful apply
+                # (e.g. "Чтобы видеть работу у дома" asking for city/district or "Какой формат удобнее?")
                 try:
                     dismissed = await page.evaluate(
                         """() => {
@@ -478,13 +478,20 @@ class HHPlaywright:
                             const INFORMATIONAL_HINTS = [
                                 'видеть работу у дома', 'город поиска работы',
                                 'укажите, в каком городе', 'район',
+                                'какой формат', 'формат работы', 'формат удобнее',
+                                'сохранить и продолжить', 'дополнительн', 'опрос',
                             ];
                             if (!INFORMATIONAL_HINTS.some(h => text.includes(h))) return false;
                             // Try close button (×)
                             const closeBtn = modal.querySelector(
-                                'button[aria-label="Закрыть"], button[class*="close"], [data-qa="bloko-modal-close"]'
+                                'button[aria-label="Закрыть"], button[class*="close"], [data-qa="bloko-modal-close"], [data-qa*="close"]'
                             );
                             if (closeBtn) { closeBtn.click(); return true; }
+                            // Try "Сохранить и продолжить" or submit
+                            const submitBtn = Array.from(modal.querySelectorAll('button')).find(b => 
+                                (b.innerText || '').toLowerCase().includes('сохранить')
+                            );
+                            if (submitBtn) { submitBtn.click(); return true; }
                             // Fallback: "Назад" button
                             for (const b of modal.querySelectorAll('button')) {
                                 if ((b.innerText || '').trim().toLowerCase() === 'назад') {
@@ -530,15 +537,33 @@ class HHPlaywright:
                 # УРА! Отклик прошел успешно. Теперь мы не тратим токены на мертвые вакансии!
                 # Смотрим, есть ли кнопка "Приложить сопроводительное письмо"
                 if cover_letter and callable(cover_letter):
-                    attach_btn = await page.query_selector(
-                        'button:has-text("Приложить сопроводительное письмо"), span:has-text("Приложить сопроводительное письмо"), a:has-text("Приложить сопроводительное письмо")'
-                    )
-                    if attach_btn:
-                        log.info("hh_attaching_deferred_cover_letter_after_success")
-                        await attach_btn.click()
-                        await page.wait_for_timeout(1000)
-                        # Генерируем письмо (тратим токены только сейчас!)
-                        try:
+                    try:
+                        # Если модалка опроса всё ещё поверх экрана, закрываем её
+                        await page.evaluate(
+                            """() => {
+                                const modals = document.querySelectorAll('[role="dialog"], .bloko-modal');
+                                for (const m of modals) {
+                                    const text = (m.innerText || '').toLowerCase();
+                                    if (text.includes('какой формат') || text.includes('работу у дома') || text.includes('опрос')) {
+                                        const closeBtn = m.querySelector('button[aria-label="Закрыть"], [data-qa*="close"], button[class*="close"]');
+                                        if (closeBtn) closeBtn.click();
+                                    }
+                                }
+                            }"""
+                        )
+                        await page.wait_for_timeout(500)
+
+                        attach_btn = await page.query_selector(
+                            'button:has-text("Приложить сопроводительное письмо"), span:has-text("Приложить сопроводительное письмо"), a:has-text("Приложить сопроводительное письмо")'
+                        )
+                        if attach_btn:
+                            log.info("hh_attaching_deferred_cover_letter_after_success")
+                            try:
+                                await attach_btn.click(timeout=5000)
+                            except Exception:
+                                await attach_btn.click(force=True, timeout=5000)
+                            await page.wait_for_timeout(1000)
+                            # Генерируем письмо (тратим токены только сейчас!)
                             import asyncio
 
                             cl_text = (
@@ -559,8 +584,8 @@ class HHPlaywright:
                                     if send_btn:
                                         await send_btn.click()
                                         await page.wait_for_timeout(1000)
-                        except Exception as e:
-                            log.error("hh_deferred_cover_letter_attach_error", error=str(e))
+                    except Exception as e:
+                        log.error("hh_deferred_cover_letter_attach_error", error=str(e))
 
                 if screenshot_name:
                     try:
