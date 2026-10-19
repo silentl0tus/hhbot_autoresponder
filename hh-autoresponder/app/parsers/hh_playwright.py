@@ -688,8 +688,77 @@ class HHPlaywright:
             log.error("hh_apply_error", url=vacancy_url, error=err_msg[:100])
             return False
 
+    async def _capture_captcha_screenshot(self, page, captcha_input=None) -> bytes:
+        """Capture screenshot of captcha image or surrounding modal/page.
+
+        Guarantees that avatars, profile pictures or logos are NEVER captured.
+        """
+        captcha_img_selectors = [
+            'img[data-qa="account-captcha-picture"]',
+            'img[data-qa="captcha-picture"]',
+            'img[data-qa*="captcha-picture"]',
+            'img[data-qa*="captcha-image"]',
+            'img[data-qa*="captcha"]',
+            'img[src*="/captcha"]',
+            'img[src*="captcha"]',
+            'img[src*="kaptcha"]',
+            '[data-qa="captcha-picture"] img',
+            '[data-qa="captcha-picture"]',
+        ]
+
+        # 1. Сначала ищем специализированные элементы капчи
+        for sel in captcha_img_selectors:
+            try:
+                for img in await page.query_selector_all(sel):
+                    if not await img.is_visible():
+                        continue
+                    src = (await img.get_attribute("src") or "").lower()
+                    if any(bad in src for bad in ("avatar", "photo", "user", "logo", "profile")):
+                        continue
+                    box = await img.bounding_box()
+                    if box and box["width"] >= 60 and box["height"] >= 20:
+                        return await img.screenshot()
+            except Exception as e:
+                log.warning("captcha_img_selector_error", selector=sel, error=str(e))
+
+        # 2. Если есть поле ввода — ищем изображение внутри той же формы/контейнера (исключая аватары)
+        if captcha_input:
+            try:
+                nearby_img = await page.evaluate_handle(
+                    """(input) => {
+                        const form = input.closest('form') || input.closest('[data-qa*="captcha"]') || input.parentElement;
+                        if (!form) return null;
+                        const imgs = form.querySelectorAll('img');
+                        for (const im of imgs) {
+                            const src = (im.src || '').toLowerCase();
+                            if (!src.includes('avatar') && !src.includes('photo') && !src.includes('user') && !src.includes('logo')) {
+                                return im;
+                            }
+                        }
+                        return null;
+                    }""",
+                    captcha_input,
+                )
+                if nearby_img and nearby_img.as_element():
+                    box = await nearby_img.as_element().bounding_box()
+                    if box and box["width"] >= 60 and box["height"] >= 20:
+                        return await nearby_img.as_element().screenshot()
+            except Exception as e:
+                log.warning("captcha_nearby_img_error", error=str(e))
+
+        # 3. Резерв: скриншот всего модального окна (контейнера целиком, а не случайной картинки внутри него!)
+        try:
+            modal = await page.query_selector('.bloko-modal, [role="dialog"]')
+            if modal and await modal.is_visible():
+                return await modal.screenshot()
+        except Exception as e:
+            log.warning("captcha_modal_screenshot_error", error=str(e))
+
+        # 4. Резерв: скриншот всей страницы
+        return await page.screenshot()
+
     async def _solve_captcha_if_present(self, page) -> bool:
-        """Checks for CAPTCHA, solves it using AI Vision, and submits.
+        """Checks for CAPTCHA, and prompts user to solve it via Telegram.
 
         Fallback: if AI fails after 3 attempts, sends screenshot to Telegram
         and waits for the user to type the CAPTCHA text manually (5 min timeout).
@@ -701,19 +770,13 @@ class HHPlaywright:
         if not captcha_input or not await captcha_input.is_visible():
             return False
 
-        # Ищем саму картинку капчи
-        IMG_SELECTOR = 'img[src*="/captcha/"], img[data-qa*="captcha"], [data-qa="captcha-picture"], .bloko-modal img, [role="dialog"] img'
-        captcha_img = await page.query_selector(IMG_SELECTOR)
-        if not captcha_img:
-            return False
-
         log.warning("hh_captcha_detected", url=page.url)
 
         # По просьбе пользователя пропускаем попытки решения через нейросеть
         # и сразу просим ввести капчу вручную.
-        return await self._request_manual_captcha(page)
+        return await self._request_manual_captcha(page, captcha_input=captcha_input)
 
-    async def _request_manual_captcha(self, page) -> bool:
+    async def _request_manual_captcha(self, page, captcha_input=None) -> bool:
         """Send CAPTCHA screenshot to Telegram and wait for user input.
 
         Uses asyncio.Event so the Telegram handler can wake us up.
@@ -721,13 +784,8 @@ class HHPlaywright:
         """
         from app.utils import notifier
 
-        # Take a fresh screenshot of the captcha area (or full page)
-        IMG_SELECTOR = 'img[src*="/captcha/"], img[data-qa*="captcha"], [data-qa="captcha-picture"], .bloko-modal img, [role="dialog"] img'
-        captcha_img = await page.query_selector(IMG_SELECTOR)
-        if captcha_img:
-            self._captcha_screenshot = await captcha_img.screenshot()
-        else:
-            self._captcha_screenshot = await page.screenshot()
+        # Снимаем скриншот реальной капчи (или всего модального окна, исключая аватары)
+        self._captcha_screenshot = await self._capture_captcha_screenshot(page, captcha_input=captcha_input)
 
         # Save screenshot to disk so Telegram handler can send it
         screenshot_path = "data/debug_captcha_manual.png"
