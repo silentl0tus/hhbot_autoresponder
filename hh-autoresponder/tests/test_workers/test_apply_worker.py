@@ -176,3 +176,75 @@ async def test_run_auto_apply_appends_to_sheets_after_db_commit(test_session, mo
 
     assert applied == 1
     assert status_during_append == VacancyStatus.APPLIED
+
+
+@pytest.mark.asyncio
+async def test_run_auto_apply_marks_needs_test_as_rejected_and_notifies_user(test_session, mocker):
+    """Тест: если вакансия требует тест, а pass_tests=False, вакансия помечается REJECTED,
+    создается запись в Google Таблице со статусом 'Требуется тест (вручную)' и отправляется
+    уведомление с прямой ссылкой пользователю."""
+    import json
+
+    from sqlalchemy import select
+
+    from app.models.application import Application, ApplicationStatus
+
+    mocker.patch("app.workers.apply_worker.async_session", test_session)
+    mocker.patch("app.workers.apply_worker.random_delay", new_callable=AsyncMock)
+    mocker.patch("app.workers.apply_worker.sync_applied_from_hh", new_callable=AsyncMock)
+    mock_append = mocker.patch("app.workers.apply_worker.append_application", new_callable=AsyncMock)
+    mock_notify_send = mocker.patch("app.utils.notifier.send", new_callable=AsyncMock)
+    mocker.patch("app.utils.notifier.vlog", new_callable=AsyncMock)
+
+    # Mock scheduler_state to have pass_tests = False
+    fake_state = json.dumps({"pass_tests": False, "is_paused": False, "auto_apply": True})
+    mocker.patch("pathlib.Path.exists", return_value=True)
+    mocker.patch("pathlib.Path.read_text", return_value=fake_state)
+
+    mocker.patch("app.workers.apply_worker.HHParser.login", new_callable=AsyncMock, return_value=True)
+    mocker.patch(
+        "app.workers.apply_worker.HHParser.apply_to_vacancy",
+        new_callable=AsyncMock,
+        return_value="needs_test",
+    )
+
+    async with test_session() as session:
+        company = Company(name="TestCorp", platform="hh", platform_id="301")
+        session.add(company)
+        await session.flush()
+        vac = Vacancy(
+            platform="hh",
+            external_id="vac_needs_test_1",
+            title="Senior QA Engineer",
+            url="https://hh.ru/vacancy/test_1",
+            company_id=company.id,
+            status=VacancyStatus.APPROVED,
+            ai_score=88.0,
+            ai_reason="Отличный стек",
+            work_format="remote",
+        )
+        session.add(vac)
+        await session.commit()
+
+    applied = await run_auto_apply(auto_mode=False, min_score=50, target_count=1)
+
+    assert applied == 0
+
+    async with test_session() as session:
+        v = await session.scalar(select(Vacancy).where(Vacancy.external_id == "vac_needs_test_1"))
+        assert v is not None
+        assert v.status == VacancyStatus.REJECTED
+        assert "Требуется тест/анкета" in v.ai_reason
+
+        app = await session.scalar(select(Application).where(Application.vacancy_id == v.id))
+        assert app is not None
+        assert app.status == ApplicationStatus.FAILED
+        assert "needs_test" in app.error_message
+
+    mock_append.assert_awaited_once()
+    assert mock_append.call_args.kwargs["status"] == "Требуется тест (вручную)"
+
+    mock_notify_send.assert_awaited_once()
+    notify_text = mock_notify_send.call_args[0][0]
+    assert "https://hh.ru/vacancy/test_1" in notify_text
+    assert "Senior QA Engineer" in notify_text

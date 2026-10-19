@@ -208,7 +208,11 @@ class HHPlaywright:
             pass
 
     async def _apply_to_vacancy_unlocked(
-        self, vacancy_url: str, cover_letter: str | typing.Callable, screenshot_name: str | None = None
+        self,
+        vacancy_url: str,
+        cover_letter: str | typing.Callable,
+        screenshot_name: str | None = None,
+        pass_tests: bool = True,
     ) -> bool | str:
         """Apply to vacancy via Playwright browser automation (called with self._lock held).
 
@@ -381,7 +385,10 @@ class HHPlaywright:
                 log.warning("hh_foreign_modal_error", error=str(e))
 
             # We're now either on the vacancy_response page or in the response modal
-            await self._fill_response_form(page, cover_letter, vacancy_url)
+            form_res = await self._fill_response_form(page, cover_letter, vacancy_url, pass_tests=pass_tests)
+            if form_res == "needs_test":
+                log.info("hh_apply_needs_test_detected", url=vacancy_url)
+                return "needs_test"
 
             # Submit
             submit_btn = await page.query_selector('[data-qa="vacancy-response-submit-popup"]')
@@ -734,11 +741,17 @@ class HHPlaywright:
             return False
 
     async def apply_to_vacancy(
-        self, vacancy_url: str, cover_letter: str | typing.Callable, screenshot_name: str | None = None
+        self,
+        vacancy_url: str,
+        cover_letter: str | typing.Callable,
+        screenshot_name: str | None = None,
+        pass_tests: bool = True,
     ) -> bool | str:
         """Thread-safe public entry point for apply_to_vacancy."""
         async with self._lock:
-            return await self._apply_to_vacancy_unlocked(vacancy_url, cover_letter, screenshot_name)
+            return await self._apply_to_vacancy_unlocked(
+                vacancy_url, cover_letter, screenshot_name, pass_tests=pass_tests
+            )
 
     async def _capture_captcha_screenshot(self, page, captcha_input=None) -> bytes:
         """Capture screenshot of captcha image or surrounding modal/page.
@@ -934,7 +947,13 @@ class HHPlaywright:
         if self._captcha_event:
             self._captcha_event.set()
 
-    async def _fill_response_form(self, page, cover_letter: str | typing.Callable, vacancy_url: str):
+    async def _fill_response_form(
+        self,
+        page,
+        cover_letter: str | typing.Callable,
+        vacancy_url: str,
+        pass_tests: bool = True,
+    ) -> str | None:
         """Fill cover letter, employer questions (test task), and resume picker."""
         from app.ai.claude import claude_ai, TEST_MODEL
         from app.config import settings as cfg
@@ -966,6 +985,10 @@ class HHPlaywright:
                 if ta:
                     question_textareas.append(ta)
         log.info("hh_question_textareas_found", count=len(question_textareas))
+
+        if question_textareas and not pass_tests:
+            log.info("hh_skip_test_task_found", url=vacancy_url, count=len(question_textareas))
+            return "needs_test"
 
         # 1b. Radio-button questions (multiple choice)
         try:

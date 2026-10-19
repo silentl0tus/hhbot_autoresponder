@@ -303,7 +303,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
                 try:
                     await asyncio.wait_for(parser.login(), timeout=60)
                     res = await asyncio.wait_for(
-                        parser.apply_to_vacancy(vacancy.url, letter),
+                        parser.apply_to_vacancy(vacancy.url, letter, pass_tests=pass_tests),
                         timeout=300,
                     )
                     result = res
@@ -319,7 +319,8 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
                             skip_record = True
                         elif res == "needs_test" and not pass_tests:
                             log.info("hh_skip_test_disabled", vacancy_id=vacancy.id)
-                            skip_record = True
+                            # Do NOT set skip_record = True — we record this vacancy as REJECTED
+                            # and notify the user with a direct link, avoiding infinite loops.
                 except asyncio.TimeoutError:
                     log.error("hh_playwright_timeout", vacancy_id=vacancy.id)
                     result = False
@@ -342,6 +343,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
 
             success = result is True  # True != "already"
             already = result == "already"
+            needs_test_skipped = (result == "needs_test") and (not pass_tests)
 
             # Записываем результат
             final_letter = letter_box["text"] if callable(letter) else letter
@@ -353,6 +355,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
                         platform=vacancy.platform,
                         cover_letter=final_letter,
                         status=ApplicationStatus.SENT if success else ApplicationStatus.FAILED,
+                        error_message="needs_test: авто-прохождение тестов отключено" if needs_test_skipped else None,
                         attempt_count=1,
                     )
                     session.add(app)
@@ -363,6 +366,9 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
                     applied += 1
                 elif already:
                     v.status = VacancyStatus.APPLIED
+                elif needs_test_skipped:
+                    v.status = VacancyStatus.REJECTED
+                    v.ai_reason = f"{v.ai_reason or ''} [Требуется тест/анкета, автотесты отключены]".strip()
                 await session.commit()
 
             # Append to Google Sheets if it's a new application attempt (not already applied)
@@ -380,12 +386,16 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
                 elif vacancy.salary_to:
                     salary_str = f"до {vacancy.salary_to} {vacancy.salary_currency}"
 
+                sheets_status = (
+                    "Ждем ответа" if success else ("Требуется тест (вручную)" if needs_test_skipped else "Ошибка")
+                )
+
                 await append_application(
                     date_str=date_str,
                     title=vacancy.title or "",
                     company=company_name,
                     url=vacancy.url or "",
-                    status="Ждем ответа" if success else "Ошибка",
+                    status=sheets_status,
                     cover_letter=final_letter,
                     ai_score=vacancy.ai_score,
                     platform=vacancy.platform or "",
@@ -404,22 +414,42 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
 
             # Детальный лог отклика в Telegram
             _plat_label = {"hh": "hh.ru", "habr": "Хабр Карьера"}.get(vacancy.platform, vacancy.platform)
+            _score_str = f"{int(vacancy.ai_score)}%" if vacancy.ai_score is not None else "—"
             if success:
                 _prog = f" [{applied}/{cycle_target}]" if cycle_target > 0 else f" [#{applied}]"
                 _emoji, _word = "✅", f"Отклик отправлен{_prog}"
+                await notifier.vlog(
+                    f"{_emoji} <b>{_word}</b> · {_plat_label} · score {_score_str}\n"
+                    f"{(vacancy.title or '')[:90]}\n"
+                    f"{vacancy.url}"
+                )
             elif already:
                 _emoji, _word = "↩️", "Уже откликались"
+                await notifier.vlog(
+                    f"{_emoji} <b>{_word}</b> · {_plat_label} · score {_score_str}\n"
+                    f"{(vacancy.title or '')[:90]}\n"
+                    f"{vacancy.url}"
+                )
+            elif needs_test_skipped:
+                company_name = vacancy.company.name if vacancy.company else ""
+                await notifier.send(
+                    f"📝 <b>Вакансия требует тест / анкету</b> · {_plat_label} · score {_score_str}\n"
+                    f"<b>{(vacancy.title or '')[:90]}</b>\n"
+                    f"{company_name}\n\n"
+                    f"⚠️ Автопрохождение тестов выключено в настройках (<code>pass_tests=False</code>). "
+                    f"Вакансия снята с авто-очереди бота, чтобы не зацикливать цикл откликов.\n\n"
+                    f"👉 <b>Вы можете пройти тест и откликнуться вручную:</b>\n"
+                    f"{vacancy.url}"
+                )
             else:
                 _emoji, _word = "❌", "Не удалось откликнуться"
                 if isinstance(result, str) and result.startswith("error:"):
                     _word += f" ({result[6:].strip()})"
-
-            _score_str = f"{int(vacancy.ai_score)}%" if vacancy.ai_score is not None else "—"
-            await notifier.vlog(
-                f"{_emoji} <b>{_word}</b> · {_plat_label} · score {_score_str}\n"
-                f"{(vacancy.title or '')[:90]}\n"
-                f"{vacancy.url}"
-            )
+                await notifier.vlog(
+                    f"{_emoji} <b>{_word}</b> · {_plat_label} · score {_score_str}\n"
+                    f"{(vacancy.title or '')[:90]}\n"
+                    f"{vacancy.url}"
+                )
 
             # Пауза между откликами (антибан) только если цикл продолжается
             if cycle_target <= 0 or applied < cycle_target:

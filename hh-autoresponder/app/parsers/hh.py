@@ -251,12 +251,16 @@ class HHParser:
             return None
 
     async def apply_to_vacancy(
-        self, url: str, cover_letter: str | typing.Callable, screenshot_name: str | None = None
+        self,
+        url: str,
+        cover_letter: str | typing.Callable,
+        screenshot_name: str | None = None,
+        pass_tests: bool = True,
     ) -> bool | str:
         """Apply via Playwright if available, otherwise skip."""
         pw = self._get_playwright()
         if pw:
-            return await pw.apply_to_vacancy(url, cover_letter, screenshot_name=screenshot_name)
+            return await pw.apply_to_vacancy(url, cover_letter, screenshot_name=screenshot_name, pass_tests=pass_tests)
         log.warning("hh_apply_not_supported", url=url, reason="playwright not available")
         return False
 
