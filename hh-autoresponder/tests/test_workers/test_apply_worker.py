@@ -130,3 +130,49 @@ async def test_run_auto_apply_replenishes_when_queue_empty(test_session, mocker)
     assert applied == 0
     mock_search.assert_awaited_once()
     mock_analyze.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_auto_apply_appends_to_sheets_after_db_commit(test_session, mocker):
+    """Тест: append_application вызывается уже ПОСЛЕ того, как статус вакансии зафиксирован в БД."""
+    from sqlalchemy import select
+
+    mocker.patch("app.workers.apply_worker.async_session", test_session)
+    mocker.patch("app.workers.apply_worker.random_delay", new_callable=AsyncMock)
+    mocker.patch("app.workers.apply_worker.sync_applied_from_hh", new_callable=AsyncMock)
+    mocker.patch("app.utils.notifier.vlog", new_callable=AsyncMock)
+
+    status_during_append = None
+
+    async def mock_append(**kwargs):
+        nonlocal status_during_append
+        # В момент вызова append_application статус в БД уже должен быть закоммичен как APPLIED
+        async with test_session() as session:
+            v = await session.scalar(select(Vacancy).where(Vacancy.external_id == "vac_sheets_1"))
+            status_during_append = v.status if v else None
+
+    mocker.patch("app.workers.apply_worker.append_application", side_effect=mock_append)
+    mocker.patch("app.workers.apply_worker.HHParser.login", new_callable=AsyncMock, return_value=True)
+    mocker.patch("app.workers.apply_worker.HHParser.apply_to_vacancy", new_callable=AsyncMock, return_value=True)
+
+    async with test_session() as session:
+        company = Company(name="SheetsCorp", platform="hh", platform_id="201")
+        session.add(company)
+        await session.flush()
+        vac = Vacancy(
+            platform="hh",
+            external_id="vac_sheets_1",
+            title="Python Architect",
+            url="https://hh.ru/vacancy/sheets_1",
+            company_id=company.id,
+            status=VacancyStatus.APPROVED,
+            ai_score=95.0,
+            work_format="remote",
+        )
+        session.add(vac)
+        await session.commit()
+
+    applied = await run_auto_apply(auto_mode=False, min_score=50, target_count=1)
+
+    assert applied == 1
+    assert status_during_append == VacancyStatus.APPLIED

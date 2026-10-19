@@ -365,35 +365,33 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
                     v.status = VacancyStatus.APPLIED
                 await session.commit()
 
-                # Fetch date formatting
+            # Append to Google Sheets if it's a new application attempt (not already applied)
+            if not already:
                 from datetime import datetime
                 from zoneinfo import ZoneInfo
 
                 date_str = datetime.now(ZoneInfo("Europe/Moscow")).strftime("%Y-%m-%d %H:%M:%S")
+                company_name = vacancy.company.name if vacancy.company else ""
+                salary_str = ""
+                if vacancy.salary_from and vacancy.salary_to:
+                    salary_str = f"{vacancy.salary_from} - {vacancy.salary_to} {vacancy.salary_currency}"
+                elif vacancy.salary_from:
+                    salary_str = f"от {vacancy.salary_from} {vacancy.salary_currency}"
+                elif vacancy.salary_to:
+                    salary_str = f"до {vacancy.salary_to} {vacancy.salary_currency}"
 
-                # Append to Google Sheets if it's a new application attempt (not already applied)
-                if not already:
-                    company_name = vacancy.company.name if vacancy.company else ""
-                    salary_str = ""
-                    if vacancy.salary_from and vacancy.salary_to:
-                        salary_str = f"{vacancy.salary_from} - {vacancy.salary_to} {vacancy.salary_currency}"
-                    elif vacancy.salary_from:
-                        salary_str = f"от {vacancy.salary_from} {vacancy.salary_currency}"
-                    elif vacancy.salary_to:
-                        salary_str = f"до {vacancy.salary_to} {vacancy.salary_currency}"
-
-                    await append_application(
-                        date_str=date_str,
-                        title=vacancy.title or "",
-                        company=company_name,
-                        url=vacancy.url or "",
-                        status="Ждем ответа" if success else "Ошибка",
-                        cover_letter=final_letter,
-                        ai_score=vacancy.ai_score,
-                        platform=vacancy.platform or "",
-                        salary=salary_str,
-                        vacancy_id=str(vacancy.external_id or ""),
-                    )
+                await append_application(
+                    date_str=date_str,
+                    title=vacancy.title or "",
+                    company=company_name,
+                    url=vacancy.url or "",
+                    status="Ждем ответа" if success else "Ошибка",
+                    cover_letter=final_letter,
+                    ai_score=vacancy.ai_score,
+                    platform=vacancy.platform or "",
+                    salary=salary_str,
+                    vacancy_id=str(vacancy.external_id or ""),
+                )
 
             log.info(
                 "apply_result",
