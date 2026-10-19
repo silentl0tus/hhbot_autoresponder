@@ -14,6 +14,7 @@ Flow:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -68,6 +69,14 @@ def _save_token(token: dict):
 class HHOAuth:
     platform = "hh"
 
+    def __init__(self):
+        self._lock = asyncio.Lock()
+
+    async def invalidate_token(self):
+        """Safely invalidate and remove cached token under the lock."""
+        async with self._lock:
+            TOKEN_FILE.unlink(missing_ok=True)
+
     async def _refresh(self, refresh_token: str) -> dict | None:
         try:
             async with httpx.AsyncClient(timeout=15) as c:
@@ -102,6 +111,7 @@ class HHOAuth:
         except ImportError:
             log.error("oauth_no_playwright")
             return None
+        page = None
         try:
             page = await browser_manager.new_page("hh")
             authorize_url = (
@@ -151,11 +161,6 @@ class HHOAuth:
             # Wait a bit more for redirect listeners to fire
             await page.wait_for_timeout(1500)
 
-            try:
-                await page.close()
-            except Exception:
-                pass
-
             if captured["code"]:
                 return captured["code"]
             log.error("oauth_no_code_playwright_final", url=authorize_url[:100])
@@ -163,6 +168,12 @@ class HHOAuth:
         except Exception as e:
             log.error("oauth_playwright_error", error=str(e))
             return None
+        finally:
+            if page:
+                try:
+                    await page.close()
+                except Exception:
+                    pass
 
     async def _authorize(self) -> dict | None:
         """Get OAuth token: authorize via Playwright + token exchange via httpx."""
@@ -199,22 +210,33 @@ class HHOAuth:
             log.error("oauth_authorize_error", error=str(e))
         return None
 
-    async def get_token(self) -> str:
-        cached = _load_token()
-        if cached and cached.get("expires_at", 0) > time.time() + 300:
-            return cached["access_token"]
-        # Try refresh
-        if cached and cached.get("refresh_token"):
-            new = await self._refresh(cached["refresh_token"])
+    async def get_token(self, force_refresh: bool = False, failed_token: str | None = None) -> str:
+        async with self._lock:
+            cached = _load_token()
+            if cached:
+                cached_token = cached.get("access_token", "")
+                if (
+                    failed_token
+                    and cached_token
+                    and cached_token != failed_token
+                    and cached.get("expires_at", 0) > time.time() + 60
+                ):
+                    return cached_token
+                if not force_refresh and cached.get("expires_at", 0) > time.time() + 300:
+                    return cached_token
+
+            # Try refresh
+            if cached and cached.get("refresh_token"):
+                new = await self._refresh(cached["refresh_token"])
+                if new:
+                    _save_token(new)
+                    return new["access_token"]
+            # Full authorize
+            new = await self._authorize()
             if new:
                 _save_token(new)
                 return new["access_token"]
-        # Full authorize
-        new = await self._authorize()
-        if new:
-            _save_token(new)
-            return new["access_token"]
-        return ""
+            return ""
 
     async def apply(self, vacancy_id: str, message: str = "") -> tuple[bool | str, dict]:
         rhash = settings.hh_resume_id
@@ -261,8 +283,7 @@ class HHOAuth:
             )
             if looks_like_auth_dead and "already" not in body_text.lower():
                 log.warning("oauth_token_died_retrying", body=body_text[:200])
-                TOKEN_FILE.unlink(missing_ok=True)
-                token2 = await self.get_token()
+                token2 = await self.get_token(force_refresh=True, failed_token=token)
                 if token2:
                     try:
                         r = await _post(token2)
@@ -310,7 +331,7 @@ class HHOAuth:
                 return "already", {"error": "application_denied", "data": d}
             return False, {"error": err_value or "bad_request", "status": r.status_code, "data": d}
         if r.status_code == 401:
-            TOKEN_FILE.unlink(missing_ok=True)
+            await self.invalidate_token()
             return False, {"error": "auth_expired"}
         if r.status_code == 404:
             return "already", {"error": "not_found"}
