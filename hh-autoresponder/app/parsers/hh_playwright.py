@@ -75,6 +75,7 @@ class HHPlaywright:
     def __init__(self):
         self._logged_in = False
         self._page: Page | None = None
+        self._lock = asyncio.Lock()
         # CAPTCHA manual fallback state
         self._captcha_event: asyncio.Event | None = None
         self._captcha_text: str = ""
@@ -86,8 +87,8 @@ class HHPlaywright:
         self._page = await browser_manager.new_page("hh")
         return self._page
 
-    async def login(self) -> bool:
-        """Login to hh.ru using saved session or credentials."""
+    async def _login_unlocked(self) -> bool:
+        """Login to hh.ru using saved session or credentials (called with self._lock held)."""
         if self._logged_in:
             return True
 
@@ -192,6 +193,11 @@ class HHPlaywright:
             log.error("hh_login_error", error=str(e))
             return False
 
+    async def login(self) -> bool:
+        """Login to hh.ru using saved session or credentials."""
+        async with self._lock:
+            return await self._login_unlocked()
+
     async def _save_debug_screenshot(self, page: Page, name: str):
         """Save debug screenshot to data/ directory."""
         try:
@@ -201,10 +207,10 @@ class HHPlaywright:
         except Exception:
             pass
 
-    async def apply_to_vacancy(
+    async def _apply_to_vacancy_unlocked(
         self, vacancy_url: str, cover_letter: str | typing.Callable, screenshot_name: str | None = None
     ) -> bool | str:
-        """Apply to vacancy via Playwright browser automation.
+        """Apply to vacancy via Playwright browser automation (called with self._lock held).
 
         Handles employer questions/test tasks: extracts question text,
         asks Claude AI to generate an answer, fills it in.
@@ -214,7 +220,7 @@ class HHPlaywright:
         /test_apply command to give visual feedback.
         """
         if not self._logged_in:
-            if not await self.login():
+            if not await self._login_unlocked():
                 return False
 
         # If the cached page is closed/crashed, recreate it
@@ -726,6 +732,13 @@ class HHPlaywright:
                 return err_msg
             log.error("hh_apply_error", url=vacancy_url, error=err_msg[:100])
             return False
+
+    async def apply_to_vacancy(
+        self, vacancy_url: str, cover_letter: str | typing.Callable, screenshot_name: str | None = None
+    ) -> bool | str:
+        """Thread-safe public entry point for apply_to_vacancy."""
+        async with self._lock:
+            return await self._apply_to_vacancy_unlocked(vacancy_url, cover_letter, screenshot_name)
 
     async def _capture_captcha_screenshot(self, page, captcha_input=None) -> bytes:
         """Capture screenshot of captcha image or surrounding modal/page.
@@ -1346,10 +1359,10 @@ class HHPlaywright:
             except Exception:
                 pass
 
-    async def check_messages(self) -> list[dict]:
-        """Check negotiations/messages on hh.ru."""
+    async def _check_messages_unlocked(self) -> list[dict]:
+        """Check negotiations/messages on hh.ru (called with self._lock held)."""
         if not self._logged_in:
-            if not await self.login():
+            if not await self._login_unlocked():
                 return []
 
         page = await self._get_page()
@@ -1431,6 +1444,11 @@ class HHPlaywright:
 
         return messages
 
+    async def check_messages(self) -> list[dict]:
+        """Thread-safe public entry point for check_messages."""
+        async with self._lock:
+            return await self._check_messages_unlocked()
+
     async def _parse_negotiation_item(self, item) -> dict | None:
         """Parse a single negotiation row from the page."""
         title_el = await item.query_selector('[data-qa="negotiations-item-title"]')
@@ -1471,14 +1489,14 @@ class HHPlaywright:
             "has_unread": has_unread,
         }
 
-    async def check_negotiations_status(self) -> list[dict]:
-        """Check the status of all active negotiations (invites, rejections, etc.).
+    async def _check_negotiations_status_unlocked(self) -> list[dict]:
+        """Check the status of all active negotiations (invites, rejections, etc., called with self._lock held).
 
         hh.ru ignores ?state= URL params in the new chat widget — we fetch
         the page once and classify each chat by its status text instead.
         """
         if not self._logged_in:
-            if not await self.login():
+            if not await self._login_unlocked():
                 return []
 
         page = await self._get_page()
@@ -1617,7 +1635,12 @@ class HHPlaywright:
         )
         return statuses
 
-    async def is_logged_in(self) -> bool:
+    async def check_negotiations_status(self) -> list[dict]:
+        """Thread-safe public entry point for check_negotiations_status."""
+        async with self._lock:
+            return await self._check_negotiations_status_unlocked()
+
+    async def _is_logged_in_unlocked(self) -> bool:
         """Cheap check: visit /applicant/resumes and see if we get redirected
         to login. Returns True only if we land on a real applicant page."""
         page = await self._get_page()
@@ -1647,10 +1670,15 @@ class HHPlaywright:
             log.warning("hh_login_check_error", error=str(e))
             return False
 
-    async def bump_resumes(self) -> int:
-        """Click 'Поднять в поиске' on all resumes. Returns number bumped."""
+    async def is_logged_in(self) -> bool:
+        """Thread-safe public entry point for is_logged_in."""
+        async with self._lock:
+            return await self._is_logged_in_unlocked()
+
+    async def _bump_resumes_unlocked(self) -> int:
+        """Click 'Поднять в поиске' on all resumes (called with self._lock held). Returns number bumped."""
         if not self._logged_in:
-            if not await self.login():
+            if not await self._login_unlocked():
                 return 0
 
         # Recreate page to avoid stale crashed state
@@ -1704,13 +1732,18 @@ class HHPlaywright:
 
         return bumped
 
-    async def send_thanks_via_clicks(self, max_count: int = 3) -> int:
-        """Open the chatik widget, find rejection chats and send thanks.
+    async def bump_resumes(self) -> int:
+        """Thread-safe public entry point for bump_resumes."""
+        async with self._lock:
+            return await self._bump_resumes_unlocked()
+
+    async def _send_thanks_via_clicks_unlocked(self, max_count: int = 3) -> int:
+        """Open the chatik widget, find rejection chats and send thanks (called with self._lock held).
 
         Diagnostic-first: tries once, saves screenshots at every step.
         """
         if not self._logged_in:
-            if not await self.login():
+            if not await self._login_unlocked():
                 return 0
 
         page = await self._get_page()
@@ -1967,11 +2000,11 @@ class HHPlaywright:
             log.warning("hh_thanks_send_error", error=str(e))
             return False
 
-    async def send_rejection_thanks(self, negotiation_url: str) -> bool:
-        """Send a 'thanks for feedback' message in a rejected negotiation chat.
+    async def _send_rejection_thanks_unlocked(self, negotiation_url: str) -> bool:
+        """Send a 'thanks for feedback' message in a rejected negotiation chat (called with self._lock held).
         This keeps the resume active in hh.ru rankings."""
         if not self._logged_in:
-            if not await self.login():
+            if not await self._login_unlocked():
                 return False
 
         page = await self._get_page()
@@ -2015,21 +2048,25 @@ class HHPlaywright:
             log.error("hh_thanks_error", url=negotiation_url, error=str(e))
             return False
 
+    async def send_rejection_thanks(self, negotiation_url: str) -> bool:
+        """Thread-safe public entry point for send_rejection_thanks."""
+        async with self._lock:
+            return await self._send_rejection_thanks_unlocked(negotiation_url)
+
     async def close(self):
         """Close page and save session."""
-        if self._page and not self._page.is_closed():
-            await browser_manager.save_context("hh")
-            await self._page.close()
-            self._page = None
-        self._logged_in = False
+        async with self._lock:
+            if self._page and not self._page.is_closed():
+                await browser_manager.save_context("hh")
+                await self._page.close()
+                self._page = None
+            self._logged_in = False
 
 
 # Singleton - created only when Playwright is available
 hh_playwright: HHPlaywright | None = None
 
 try:
-    from app.utils.browser import browser_manager  # noqa: F811
-
     hh_playwright = HHPlaywright()
-except ImportError:
+except Exception:
     pass
