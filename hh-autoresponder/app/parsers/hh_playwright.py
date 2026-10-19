@@ -392,6 +392,34 @@ class HHPlaywright:
                 )
 
             if submit_btn:
+                # If submit button is disabled (e.g. required cover letter or validation), try filling letter
+                if await submit_btn.is_disabled() and cover_letter:
+                    log.info("hh_submit_btn_disabled_fallback_filling_letter")
+                    try:
+                        import asyncio
+
+                        cl_text = (
+                            await cover_letter()
+                            if asyncio.iscoroutinefunction(cover_letter)
+                            else cover_letter()
+                            if callable(cover_letter)
+                            else cover_letter
+                        )
+                        if cl_text:
+                            for sel in (
+                                '[data-qa="vacancy-response-popup-form-letter-input"]',
+                                '[data-qa="cover-letter-input"]',
+                                'textarea[placeholder*="опроводительн"]',
+                                'textarea[name="text"]',
+                            ):
+                                ta = await page.query_selector(sel)
+                                if ta and await ta.is_visible():
+                                    await ta.fill(cl_text)
+                                    await page.wait_for_timeout(600)
+                                    break
+                    except Exception as e:
+                        log.warning("hh_submit_disabled_fill_error", error=str(e))
+
                 if screenshot_name:
                     try:
                         await page.screenshot(path=f"data/test_apply_{screenshot_name}_before.png")
@@ -936,11 +964,13 @@ class HHPlaywright:
                     log.info("hh_radio_chosen", question=question[:60], pick=chosen["label"][:40])
                     # Click the option
                     try:
+                        if grp_name == "unknown":
+                            continue
                         if chosen.get("id"):
                             sel = f'input#{chosen["id"]}'
                         else:
                             sel = f'input[name="{grp_name}"][value="{chosen["value"]}"]'
-                        await page.check(sel)
+                        await page.check(sel, timeout=3000)
                         await page.wait_for_timeout(300)
                     except Exception as e:
                         log.warning("hh_radio_click_error", error=str(e))
@@ -1160,10 +1190,32 @@ class HHPlaywright:
 
         if cover_letter:
             if callable(cover_letter):
-                # Пропускаем заполнение на этом этапе, чтобы не тратить токены.
-                # Письмо будет прикреплено после успешного отклика.
-                log.info("hh_skipping_cover_letter_in_form_to_save_tokens")
-                return
+                # Проверяем, не требует ли модалка обязательное сопроводительное письмо
+                is_mandatory = await page.evaluate(
+                    """() => {
+                        const text = (document.body.innerText || '').toLowerCase();
+                        return text.includes('сопроводительное письмо обязательное')
+                            || text.includes('сопроводительное письмо обязательно')
+                            || text.includes('письмо обязательно')
+                            || text.includes('напишите сопроводительное');
+                    }"""
+                )
+                if is_mandatory:
+                    log.info("hh_cover_letter_mandatory_in_modal_generating_now")
+                    try:
+                        import asyncio
+
+                        cover_letter = (
+                            await cover_letter() if asyncio.iscoroutinefunction(cover_letter) else cover_letter()
+                        )
+                    except Exception as e:
+                        log.error("hh_cover_letter_modal_gen_error", error=str(e))
+                        return
+                else:
+                    # Пропускаем заполнение на этом этапе, чтобы не тратить токены.
+                    # Письмо будет прикреплено после успешного отклика.
+                    log.info("hh_skipping_cover_letter_in_form_to_save_tokens")
+                    return
 
             filled = False
             for attempt in (1, 2, 3):
