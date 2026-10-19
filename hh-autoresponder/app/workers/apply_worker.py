@@ -273,6 +273,8 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
             if not letter:
 
                 async def generate_letter():
+                    if letter_box["text"]:
+                        return letter_box["text"]
                     if ai_cover_letters and settings.ai_enabled and settings.llm_api_key:
                         from app.ai.claude import claude_ai
 

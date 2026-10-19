@@ -1287,60 +1287,42 @@ class HHPlaywright:
 
         if cover_letter:
             if callable(cover_letter):
-                # Проверяем, не требует ли модалка обязательное сопроводительное письмо
-                is_mandatory = await page.evaluate(
-                    """() => {
-                        const text = (document.body.innerText || '').toLowerCase();
-                        return text.includes('сопроводительное письмо обязательное')
-                            || text.includes('сопроводительное письмо обязательно')
-                            || text.includes('письмо обязательно')
-                            || text.includes('напишите сопроводительное');
-                    }"""
-                )
-                if is_mandatory:
-                    log.info("hh_cover_letter_mandatory_in_modal_generating_now")
-                    try:
-                        import asyncio
-
-                        cover_letter = (
-                            await cover_letter() if asyncio.iscoroutinefunction(cover_letter) else cover_letter()
-                        )
-                    except Exception as e:
-                        log.error("hh_cover_letter_modal_gen_error", error=str(e))
-                        return
-                else:
-                    # Пропускаем заполнение на этом этапе, чтобы не тратить токены.
-                    # Письмо будет прикреплено после успешного отклика.
-                    log.info("hh_skipping_cover_letter_in_form_to_save_tokens")
-                    return
-
-            filled = False
-            for attempt in (1, 2, 3):
-                el = letter_area if attempt == 1 else await _refind_letter()
-                if el is None:
-                    if attempt < 3:
-                        await page.wait_for_timeout(600)
-                        continue
-                    break
                 try:
-                    await el.fill(cover_letter)
-                    await page.wait_for_timeout(500)
-                    filled = True
-                    break
+                    import asyncio
+
+                    cover_letter = await cover_letter() if asyncio.iscoroutinefunction(cover_letter) else cover_letter()
                 except Exception as e:
-                    msg = str(e).lower()
-                    if attempt < 3 and ("not attached" in msg or "detached" in msg or "no node" in msg):
-                        log.warning("hh_letter_stale_retry", attempt=attempt, error=str(e)[:80])
-                        await page.wait_for_timeout(700)
-                        continue
-                    log.warning("hh_letter_fill_error", error=str(e)[:120])
-                    break
-            if filled:
-                log.info("hh_letter_filled", chars=len(cover_letter))
-            else:
-                log.warning("hh_letter_fill_failed", chars=len(cover_letter))
-                if cfg.skip_if_no_cover_letter:
-                    raise RuntimeError("error: Не удалось прикрепить сопроводительное письмо")
+                    log.error("hh_cover_letter_gen_error", error=str(e))
+                    cover_letter = None
+
+            if cover_letter:
+                filled = False
+                for attempt in (1, 2, 3):
+                    el = letter_area if attempt == 1 else await _refind_letter()
+                    if el is None:
+                        if attempt < 3:
+                            await page.wait_for_timeout(600)
+                            continue
+                        break
+                    try:
+                        await el.fill(cover_letter)
+                        await page.wait_for_timeout(500)
+                        filled = True
+                        break
+                    except Exception as e:
+                        msg = str(e).lower()
+                        if attempt < 3 and ("not attached" in msg or "detached" in msg or "no node" in msg):
+                            log.warning("hh_letter_stale_retry", attempt=attempt, error=str(e)[:80])
+                            await page.wait_for_timeout(700)
+                            continue
+                        log.warning("hh_letter_fill_error", error=str(e)[:120])
+                        break
+                if filled:
+                    log.info("hh_letter_filled", chars=len(cover_letter))
+                else:
+                    log.warning("hh_letter_fill_failed", chars=len(cover_letter))
+                    if cfg.skip_if_no_cover_letter:
+                        raise RuntimeError("error: Не удалось прикрепить сопроводительное письмо")
 
         # 3. Resume picker (if multiple resumes)
         resume_select = await page.query_selector('[data-qa="vacancy-response-popup-form-resume-dropdown"]')
