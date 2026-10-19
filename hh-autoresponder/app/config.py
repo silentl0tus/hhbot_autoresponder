@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings
 
 def _split(s: str) -> list[str]:
     """Разбить строку 'a, b, c' в список ['a','b','c'] (пустые — выбросить)."""
-    return [x.strip() for x in (s or "").split(",") if x.strip()]
+    return [x.strip().strip("'\"") for x in (s or "").split(",") if x.strip().strip("'\"")]
 
 
 def save_env_variable(key: str, value: str):
@@ -79,7 +79,7 @@ class Settings(BaseSettings):
         "performance, cpa, roi, drr, seo, smm, таргет, контекст, директ, google ads, аналитика, воронк, unit"
     )
     salary_floor: int = 100000  # вакансии с указанной ЗП ниже — отсеиваем
-    score_threshold: int = 30  # мин. балл score, ниже — отклик не отправляется (0 = откликаться на всё)
+    score_threshold: int = 55  # мин. балл score, ниже — отклик не отправляется (0 = откликаться на всё)
 
     # ── Гео-фильтр ─────────────────────────────────────────────
     # GEO_FILTER_ENABLED=true — отсеивать вакансии вне допустимых регионов

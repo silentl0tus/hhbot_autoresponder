@@ -96,7 +96,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
 
     _hour = _dt.now(_ZI("Europe/Moscow")).hour
     _is_daytime = 9 <= _hour < 22
-    effective_min_score = 1 if _is_daytime else 50
+    effective_min_score = max(settings.score_threshold, 1) if _is_daytime else max(50, settings.score_threshold)
     log.info("apply_window", daytime=_is_daytime, min_score=effective_min_score, target=cycle_target)
 
     # Дневной лимит (hh и habr)

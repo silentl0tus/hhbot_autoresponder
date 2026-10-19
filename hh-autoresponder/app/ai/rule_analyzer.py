@@ -8,6 +8,7 @@
   STACK_KEYWORDS_RAW    — каждое совпадение в тексте даёт бонус к баллу
   SALARY_FLOOR          — вакансии с указанной ЗП ниже отсеиваются
 """
+
 from __future__ import annotations
 
 import re
@@ -17,16 +18,28 @@ from app.config import settings
 # Сигналы уровня (для небольшого бонуса)
 LEVEL_MIDDLE = [r"\bmiddle\b", r"\bmid\b", r"\bсредн"]
 LEVEL_SENIOR = [
-    r"\bsenior\b", r"\bстарш", r"\bлид\b", r"\blead\b", r"\bhead\b",
-    r"\bprincipal\b", r"\bархитектор\b", r"\barchitect\b",
-    r"руководител", r"директор", r"начальник", r"глава",
+    r"\bsenior\b",
+    r"\bстарш",
+    r"\bлид\b",
+    r"\blead\b",
+    r"\bhead\b",
+    r"\bprincipal\b",
+    r"\bархитектор\b",
+    r"\barchitect\b",
+    r"руководител",
+    r"директор",
+    r"начальник",
+    r"глава",
 ]
 # Дополнительные слова, которые указывают на Senior-уровень в заголовке
 # (не затрагивают описание, только title-фильтр)
 LEVEL_SENIOR_TITLE_EXTRA = [
-    r"\bexpert\b", r"\bэксперт\b",
-    r"\bteam\s*lead\b", r"\btech\s*lead\b",
-    r"ведущий", r"главный",
+    r"\bexpert\b",
+    r"\bэксперт\b",
+    r"\bteam\s*lead\b",
+    r"\btech\s*lead\b",
+    r"ведущий",
+    r"главный",
 ]
 
 
@@ -60,9 +73,12 @@ def analyze_vacancy(
     has_target = _contains_any(t, settings.target_keywords)
     if not has_target:
         return {
-            "score": 0, "reason": "Заголовок не соответствует целевым словам",
-            "is_relevant": False, "seniority": "unknown",
-            "red_flags": ["title_mismatch"], "stack_match": 0,
+            "score": 0,
+            "reason": "Заголовок не соответствует целевым словам",
+            "is_relevant": False,
+            "seniority": "unknown",
+            "red_flags": ["title_mismatch"],
+            "stack_match": 0,
         }
 
     # 2. Железная дисквалификация Senior/Lead в заголовке.
@@ -77,28 +93,26 @@ def analyze_vacancy(
             "неизвестно",
         )
         return {
-            "score": 0, "reason": f"Отказ (Senior уровень, паттерн: '{matched}')",
-            "is_relevant": False, "seniority": "senior",
-            "red_flags": ["senior_level"], "stack_match": 0,
+            "score": 0,
+            "reason": f"Отказ (Senior уровень, паттерн: '{matched}')",
+            "is_relevant": False,
+            "seniority": "senior",
+            "red_flags": ["senior_level"],
+            "stack_match": 0,
         }
 
-    # 3. Стоп-слова в заголовке — контекстная дисквалификация.
-    #    Если заголовок содержит стоп-слово И целевое слово одновременно
-    #    (напр. "AI Engineer") — НЕ дисквалифицируем, а штрафуем -10.
-    #    Если целевого слова нет (напр. "Java Developer") —
-    #    дисквалификация (score=0).
+    # 3. Стоп-слова в заголовке — ЖЕСТКАЯ дисквалификация
     has_negative = _contains_any(t, settings.negative_keywords)
-    negative_penalty = 0
     if has_negative:
-        if not has_target:
-            return {
-                "score": 0, "reason": "Дисквалифицировано стоп-словом",
-                "is_relevant": False, "seniority": "unknown",
-                "red_flags": ["negative_keyword"], "stack_match": 0,
-            }
-        # Есть и стоп-слово, и целевое → штраф, не дисквалификация
-        negative_penalty = -10
-        red_flags.append("negative_keyword_soft")
+        matched_neg = next((w for w in settings.negative_keywords if w.lower() in t), "стоп-слово")
+        return {
+            "score": 0,
+            "reason": f"Дисквалифицировано стоп-словом в заголовке: '{matched_neg}'",
+            "is_relevant": False,
+            "seniority": "unknown",
+            "red_flags": ["negative_keyword"],
+            "stack_match": 0,
+        }
 
     # 3. Зарплата ниже порога (если указана и в рублях) — отсеиваем
     cur = (salary_currency or "").upper()
@@ -106,14 +120,16 @@ def analyze_vacancy(
         best = max(salary_from or 0, salary_to or 0)
         if 0 < best < settings.salary_floor:
             return {
-                "score": 0, "reason": f"Зарплата {best} ниже порога {settings.salary_floor}",
-                "is_relevant": False, "seniority": "unknown",
-                "red_flags": ["salary_below_floor"], "stack_match": 0,
+                "score": 0,
+                "reason": f"Зарплата {best} ниже порога {settings.salary_floor}",
+                "is_relevant": False,
+                "seniority": "unknown",
+                "red_flags": ["salary_below_floor"],
+                "stack_match": 0,
             }
 
     # 4. Считаем балл
     score = 15  # совпал заголовок (снижено с 30 для обязательного наличия стека/бонусов)
-    score += negative_penalty  # штраф за стоп-слово (если был)
 
     stack_hits = sum(1 for kw in settings.stack_keywords if kw.lower() in full)
     stack_score = min(stack_hits * 5, 40)
@@ -155,9 +171,12 @@ def analyze_vacancy(
             "неизвестно",
         )
         return {
-            "score": 0, "reason": f"Отказ (Senior уровень в описании, паттерн: '{matched_desc}')",
-            "is_relevant": False, "seniority": "senior",
-            "red_flags": ["senior_level"], "stack_match": 0,
+            "score": 0,
+            "reason": f"Отказ (Senior уровень в описании, паттерн: '{matched_desc}')",
+            "is_relevant": False,
+            "seniority": "senior",
+            "red_flags": ["senior_level"],
+            "stack_match": 0,
         }
     elif is_middle:
         score += 10
@@ -166,7 +185,7 @@ def analyze_vacancy(
 
     return {
         "score": score,
-        "reason": f"title=ok, stack={stack_hits}({stack_score}p), level={seniority}{', neg_soft' if negative_penalty else ''}",
+        "reason": f"title=ok, stack={stack_hits}({stack_score}p), level={seniority}",
         "is_relevant": score >= 60,
         "seniority": seniority,
         "red_flags": red_flags,

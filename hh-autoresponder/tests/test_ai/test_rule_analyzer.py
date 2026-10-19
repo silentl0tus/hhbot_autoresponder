@@ -130,12 +130,12 @@ def test_base_score_is_15_without_stack(mocker):
     assert res["stack_match"] == 0
 
 
-def test_soft_negative_penalty(mocker):
-    """Тест: Если есть и стоп-слово, и целевое слово, дается штраф -10, но не дисквалификация (score > 0)."""
+def test_negative_keyword_disqualification(mocker):
+    """Тест: Если в заголовке есть стоп-слово, дается жесткая дисквалификация (score = 0)."""
     mocker.patch(
         "app.ai.rule_analyzer.settings",
         target_keywords=["python"],
-        negative_keywords=["стажер"],
+        negative_keywords=["стажер", "java"],
         stack_keywords=["fastapi"],
     )
     # Включаем и целевое слово и негативное в заголовок
@@ -143,9 +143,9 @@ def test_soft_negative_penalty(mocker):
     desc = "Опыт не важен. Стек: fastapi."
     res = analyze_vacancy(title, desc, skills="")
 
-    # Base = 15, Penalty = -10, Stack = +5. Total = 10.
-    assert res["score"] == 10
-    assert "negative_keyword_soft" in res["red_flags"]
+    assert res["score"] == 0
+    assert "negative_keyword" in res["red_flags"]
+    assert "Дисквалифицировано стоп-словом" in res["reason"]
     assert res["is_relevant"] is False
 
 
