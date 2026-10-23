@@ -7,6 +7,7 @@ let currentVacancySearch = '';
 
 document.addEventListener('DOMContentLoaded', () => {
   initEventListeners();
+  setupInspector();
   refreshAllData();
   setupAutoRefresh();
 });
@@ -203,14 +204,23 @@ function renderFunnel(funnel) {
   const maxCount = funnel.length > 0 ? funnel[0].count || 1 : 1;
 
   funnel.forEach(step => {
-    const pct = Math.max(8, Math.min(100, Math.round((step.count / maxCount) * 100)));
+    const pct = Math.max(12, Math.min(100, Math.round((step.count / maxCount) * 100)));
     const el = document.createElement('div');
     el.className = 'funnel-step';
+
+    const dropHtml = step.drop && step.drop > 0
+      ? `<span class="funnel-step-drop">−${step.drop.toLocaleString()} срезано</span>`
+      : '';
+
     el.innerHTML = `
       <div class="funnel-step-bar" style="width: ${pct}%"></div>
       <div class="funnel-step-content">
-        <span class="funnel-step-label">${step.stage}</span>
+        <div>
+          <div class="funnel-step-label">${step.stage}</div>
+          ${step.desc ? `<div class="funnel-step-sub">${step.desc}</div>` : ''}
+        </div>
         <div class="funnel-step-numbers">
+          ${dropHtml}
           <span class="funnel-step-count">${step.count.toLocaleString()}</span>
           <span class="funnel-step-rate">${step.rate}</span>
         </div>
@@ -569,4 +579,166 @@ async function loadLogs() {
   } catch (err) {
     container.innerHTML = `<div class="empty-box" style="color: var(--danger);">Ошибка: ${err.message}</div>`;
   }
+}
+
+// ── Vacancy Inspector Controller ────────────────────────────
+function setupInspector() {
+  const btn = document.getElementById('btnCheckVacancy');
+  const input = document.getElementById('inspectorQuery');
+  if (btn && input) {
+    btn.addEventListener('click', () => runVacancyInspection());
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') runVacancyInspection();
+    });
+  }
+
+  const sampleBtns = document.querySelectorAll('.sample-btn');
+  sampleBtns.forEach(sb => {
+    sb.addEventListener('click', () => {
+      const vid = sb.getAttribute('data-id');
+      if (input && vid) {
+        input.value = `https://hh.ru/vacancy/${vid}`;
+        runVacancyInspection();
+      }
+    });
+  });
+}
+
+async function runVacancyInspection() {
+  const input = document.getElementById('inspectorQuery');
+  const query = input ? input.value.trim() : '';
+  if (!query) {
+    alert('Пожалуйста, введите ссылку на вакансию hh.ru или её ID');
+    return;
+  }
+
+  const loading = document.getElementById('inspectorLoading');
+  const resultContainer = document.getElementById('inspectorResult');
+  const btn = document.getElementById('btnCheckVacancy');
+
+  if (loading) loading.classList.remove('hidden');
+  if (resultContainer) resultContainer.classList.add('hidden');
+  if (btn) btn.disabled = true;
+
+  try {
+    const resp = await fetch('/api/inspector/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: query })
+    });
+    const data = await resp.json();
+    renderInspectorResult(data);
+  } catch (err) {
+    if (resultContainer) {
+      resultContainer.innerHTML = `
+        <div class="verdict-hero danger">
+          <div class="verdict-top">
+            <span class="verdict-badge">Ошибка сети</span>
+          </div>
+          <div class="verdict-title">Не удалось выполнить проверку</div>
+          <div class="verdict-summary">${err.message}</div>
+        </div>
+      `;
+      resultContainer.classList.remove('hidden');
+    }
+  } finally {
+    if (loading) loading.classList.add('hidden');
+    if (btn) btn.disabled = false;
+  }
+}
+
+function renderInspectorResult(data) {
+  const container = document.getElementById('inspectorResult');
+  if (!container) return;
+
+  if (!data.success) {
+    container.innerHTML = `
+      <div class="verdict-hero danger">
+        <div class="verdict-top">
+          <span class="verdict-badge">Ошибка</span>
+          <span class="verdict-stage">Инспектор</span>
+        </div>
+        <div class="verdict-title">Вакансия не распознана</div>
+        <div class="verdict-summary">${data.error || 'Проверьте правильность ссылки'}</div>
+      </div>
+    `;
+    container.classList.remove('hidden');
+    return;
+  }
+
+  const v = data.verdict || {};
+  const heroClass = v.badge_type || 'info';
+
+  const checklistHtml = (v.checklist || []).map(item => `
+    <div class="check-item">
+      <span class="check-icon">${item.ok ? '✅' : '❌'}</span>
+      <div>
+        <div class="check-title">${item.title}</div>
+        <div class="check-detail">${item.detail}</div>
+      </div>
+    </div>
+  `).join('');
+
+  const stackTags = (data.matched_stack || []).map(s => `<span class="tech-tag">${s}</span>`).join('');
+
+  container.innerHTML = `
+    <div class="verdict-hero ${heroClass}">
+      <div class="verdict-top">
+        <span class="verdict-badge">${v.badge || 'Результат'}</span>
+        <span class="verdict-stage">${v.stage || 'Воронка'}</span>
+      </div>
+      <div class="verdict-title">${v.title || 'Вердикт'}</div>
+      <div class="verdict-summary">${v.summary || ''}</div>
+    </div>
+
+    <div class="inspector-grid">
+      <div class="inspector-card">
+        <h4>📋 Данные вакансии</h4>
+        <div class="meta-row">
+          <span class="meta-label">Название:</span>
+          <span class="meta-value">${data.title}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Компания:</span>
+          <span class="meta-value">${data.company}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Зарплата:</span>
+          <span class="meta-value">${data.salary}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Локация:</span>
+          <span class="meta-value">${data.location}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">В базе JobHunter:</span>
+          <span class="meta-value">${data.in_database ? 'Да (ID: ' + data.external_id + ')' : 'Нет (новая)'}</span>
+        </div>
+        ${data.ai_score !== null && data.ai_score !== undefined ? `
+        <div class="meta-row">
+          <span class="meta-label">Балл скоринга:</span>
+          <span class="meta-value" style="color: #38bdf8; font-size: 1.05rem;">${data.ai_score} / 100</span>
+        </div>` : ''}
+        <div class="meta-row">
+          <span class="meta-label">Ссылка на HH:</span>
+          <span class="meta-value"><a href="${data.url}" target="_blank" rel="noopener">Открыть вакансию ↗</a></span>
+        </div>
+
+        ${stackTags ? `
+        <div style="margin-top: 16px;">
+          <span style="font-size: 0.8rem; color: var(--text-dim);">Совпавшие технологии из вашего стека:</span>
+          <div class="tech-tags">${stackTags}</div>
+        </div>` : ''}
+      </div>
+
+      <div class="inspector-card">
+        <h4>🎯 Контроль правил отбора</h4>
+        <div class="checklist-items">
+          ${checklistHtml}
+        </div>
+      </div>
+    </div>
+  `;
+
+  container.classList.remove('hidden');
 }

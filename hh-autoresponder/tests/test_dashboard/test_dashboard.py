@@ -6,6 +6,7 @@ from app.dashboard.api import (
     get_messages_list,
     get_recent_logs,
     get_vacancies_list,
+    inspect_vacancy,
 )
 from app.dashboard.server import create_dashboard_app
 
@@ -20,6 +21,7 @@ def test_dashboard_routes_registered():
     assert "/api/messages" in routes
     assert "/api/logs" in routes
     assert "/api/actions/reset_rejected" in routes
+    assert "/api/inspector/check" in routes
 
 
 @pytest.mark.asyncio
@@ -32,7 +34,9 @@ async def test_get_dashboard_stats():
     assert "sessions" in data
     assert "total_vacancies" in data["summary"]
     assert "total_sent" in data["summary"]
-    assert len(data["funnel"]) == 5
+    assert len(data["funnel"]) == 6
+    # Check drop field in funnel
+    assert "drop" in data["funnel"][1]
 
 
 @pytest.mark.asyncio
@@ -63,3 +67,24 @@ async def test_get_messages_list():
 def test_get_recent_logs():
     logs = get_recent_logs(lines_count=10)
     assert isinstance(logs, list)
+
+
+@pytest.mark.asyncio
+async def test_inspect_vacancy_invalid():
+    res = await inspect_vacancy("invalid-url-without-id")
+    assert res["success"] is False
+    assert "error" in res
+
+
+@pytest.mark.asyncio
+async def test_inspect_vacancy_db_lookup():
+    # Fetch first vacancy from DB to test lookup
+    vacs = await get_vacancies_list(limit=1)
+    if vacs["items"]:
+        vid = vacs["items"][0]["external_id"]
+        res = await inspect_vacancy(f"https://hh.ru/vacancy/{vid}")
+        assert res["success"] is True
+        assert res["in_database"] is True
+        assert res["external_id"] == vid
+        assert "verdict" in res
+        assert "checklist" in res["verdict"]

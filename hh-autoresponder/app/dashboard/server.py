@@ -10,6 +10,7 @@ from app.dashboard.api import (
     get_messages_list,
     get_recent_logs,
     get_vacancies_list,
+    inspect_vacancy,
     trigger_reset_rejected,
 )
 
@@ -86,6 +87,17 @@ async def handle_api_reset_rejected(request: web.Request) -> web.Response:
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
+async def handle_api_inspector_check(request: web.Request) -> web.Response:
+    try:
+        payload = await request.json()
+        query = payload.get("query") or payload.get("url") or ""
+        result = await inspect_vacancy(query)
+        return web.json_response(result)
+    except Exception as e:  # noqa: BLE001
+        log.error("dashboard_api_inspector_error", error=str(e))
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
 def create_dashboard_app() -> web.Application:
     app = web.Application()
 
@@ -96,6 +108,7 @@ def create_dashboard_app() -> web.Application:
     app.router.add_get("/api/messages", handle_api_messages)
     app.router.add_get("/api/logs", handle_api_logs)
     app.router.add_post("/api/actions/reset_rejected", handle_api_reset_rejected)
+    app.router.add_post("/api/inspector/check", handle_api_inspector_check)
 
     # Static files
     if STATIC_DIR.exists():

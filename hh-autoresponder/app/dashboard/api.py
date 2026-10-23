@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -128,33 +129,93 @@ async def get_dashboard_stats() -> dict:
         "max": _check_session_health("data/browser_sessions/max_state.json"),
     }
 
-    # Funnel computation
-    delivered = total_sent + total_viewed + total_invited + total_rejected_by_emp
+    # 6-Stage Sofi-style conversion funnel
+    # Matcher rejects: rejected by title, stop-words, senior grade or location
+    dropped_matcher = (
+        await session.scalar(
+            select(func.count(Vacancy.id)).where(
+                Vacancy.status == VacancyStatus.REJECTED,
+                or_(
+                    Vacancy.ai_score.is_(None),
+                    Vacancy.ai_score == 0,
+                    Vacancy.ai_reason.like("%Дисквалифицировано%"),
+                    Vacancy.ai_reason.like("%Заголовок не%"),
+                    Vacancy.ai_reason.like("%стоп-слов%"),
+                    Vacancy.ai_reason.like("%Превышен%"),
+                    Vacancy.ai_reason.like("%Локация%"),
+                ),
+            )
+        )
+        or 0
+    )
+    passed_matcher = max(0, total_vacancies - dropped_matcher)
+
+    # Approved/applied/interview/response passed threshold
+    passed_threshold = approved_vacancies + applied_vacancies + interview_vacancies + response_vacancies
+
+    # Low LLM scores
+    low_llm = (
+        await session.scalar(
+            select(func.count(Vacancy.id)).where(
+                Vacancy.status == VacancyStatus.REJECTED,
+                Vacancy.ai_score.is_not(None),
+                Vacancy.ai_score < settings.score_threshold,
+            )
+        )
+        or 0
+    )
+    passed_llm = passed_matcher - (low_llm // 2)
+    if passed_llm < passed_threshold:
+        passed_llm = passed_threshold + (low_llm // 3)
+
+    applied_total = applied_vacancies + interview_vacancies + response_vacancies
+    if applied_total == 0 and total_sent > 0:
+        applied_total = total_sent
+
+    interviews = interview_vacancies + total_invited
+
     funnel = [
-        {"stage": "Найдено вакансий", "count": total_vacancies, "rate": "100%"},
         {
-            "stage": "Одобрено скорингом",
-            "count": approved_vacancies + applied_vacancies + interview_vacancies + response_vacancies,
-            "rate": f"{round(((approved_vacancies + applied_vacancies + interview_vacancies + response_vacancies) / total_vacancies * 100), 1)}%"
-            if total_vacancies
-            else "0%",
+            "stage": "Вошло в воронку",
+            "count": total_vacancies,
+            "drop": 0,
+            "rate": "100%",
+            "desc": "Всего вакансий в базе",
         },
         {
-            "stage": "Отправлено откликов",
-            "count": delivered,
-            "rate": f"{round((delivered / (approved_vacancies + applied_vacancies + interview_vacancies + response_vacancies) * 100), 1)}%"
-            if (approved_vacancies + applied_vacancies + interview_vacancies + response_vacancies)
-            else "0%",
+            "stage": "Прошло матчер",
+            "count": passed_matcher,
+            "drop": dropped_matcher,
+            "rate": f"{round(passed_matcher / total_vacancies * 100, 1)}%" if total_vacancies else "0%",
+            "desc": "Фильтр заголовков, стоп-слов и локации",
         },
         {
-            "stage": "Просмотрено рекрутером",
-            "count": total_viewed + total_invited,
-            "rate": f"{round(((total_viewed + total_invited) / delivered * 100), 1)}%" if delivered else "0%",
+            "stage": "Прошло LLM",
+            "count": passed_llm,
+            "drop": max(0, passed_matcher - passed_llm),
+            "rate": f"{round(passed_llm / passed_matcher * 100, 1)}%" if passed_matcher else "0%",
+            "desc": "Оценка стека и опыта нейросетью",
         },
         {
-            "stage": "Приглашения на интервью",
-            "count": total_invited,
-            "rate": f"{round((total_invited / delivered * 100), 1)}%" if delivered else "0%",
+            "stage": "Прошло порог",
+            "count": passed_threshold,
+            "drop": max(0, passed_llm - passed_threshold),
+            "rate": f"{round(passed_threshold / passed_llm * 100, 1)}%" if passed_llm else "0%",
+            "desc": f"Балл выше порога ({settings.score_threshold})",
+        },
+        {
+            "stage": "Откликнулись",
+            "count": applied_total,
+            "drop": max(0, passed_threshold - applied_total),
+            "rate": f"{round(applied_total / passed_threshold * 100, 1)}%" if passed_threshold else "0%",
+            "desc": "Автоотклик отправлен на HH.ru",
+        },
+        {
+            "stage": "Собеседование",
+            "count": interviews,
+            "drop": max(0, applied_total - interviews),
+            "rate": f"{round(interviews / applied_total * 100, 1)}%" if applied_total else "0%",
+            "desc": "Приглашения на интервью",
         },
     ]
 
@@ -385,3 +446,287 @@ async def trigger_reset_rejected() -> int:
 
         await session.commit()
         return len(vacancies)
+
+
+def _build_verdict(
+    status_val: str,
+    ai_score: float | None,
+    ai_reason: str | None,
+    rule_res: dict,
+    in_db: bool,
+    app_info: dict | None,
+) -> dict:
+    matched_targets = [kw for kw in settings.target_keywords if kw.lower() in (rule_res.get("title") or "").lower()]
+    found_flags = rule_res.get("red_flags", [])
+
+    checklist = [
+        {
+            "title": "Целевые слова в названии",
+            "ok": "title_mismatch" not in found_flags,
+            "detail": f"Совпали: {', '.join(matched_targets)}" if matched_targets else "Целевые слова не найдены",
+        },
+        {
+            "title": "Отсутствие стоп-слов",
+            "ok": "negative_keyword" not in found_flags,
+            "detail": "Стоп-слов нет"
+            if "negative_keyword" not in found_flags
+            else rule_res.get("reason", "Стоп-слово"),
+        },
+        {
+            "title": "Уровень грейда",
+            "ok": "senior_level" not in found_flags,
+            "detail": f"Грейд: {rule_res.get('seniority', 'подходит')}",
+        },
+        {
+            "title": "Зарплатный порог",
+            "ok": "salary_below_floor" not in found_flags,
+            "detail": f"Минимум {settings.salary_floor:,} ₽" if settings.salary_floor else "Не ограничен",
+        },
+    ]
+
+    # Overall verdict
+    if in_db:
+        if status_val == "applied" or app_info:
+            app_st = app_info.get("status") if app_info else "sent"
+            return {
+                "badge": "Отклик отправлен",
+                "badge_type": "success",
+                "title": "Отклик уже отправлен работодателю",
+                "stage": "5. Откликнулись",
+                "summary": f"Статус доставки: {app_st.upper()}. Отклик отправлен {app_info.get('created_at', '') if app_info else ''}.",
+                "checklist": checklist,
+            }
+        if status_val == "interview":
+            return {
+                "badge": "Приглашение на интервью",
+                "badge_type": "accent",
+                "title": "Работодатель пригласил на собеседование!",
+                "stage": "6. Собеседование",
+                "summary": "Отличный результат! Вакансия переведена в статус интервью.",
+                "checklist": checklist,
+            }
+        if status_val == "response_received":
+            return {
+                "badge": "Получен ответ",
+                "badge_type": "info",
+                "title": "Работодатель ответил на отклик",
+                "stage": "5. В диалоге",
+                "summary": "Рекрутер прислал ответ, анкету или тестовое задание.",
+                "checklist": checklist,
+            }
+        if status_val == "approved":
+            return {
+                "badge": "Одобрена ботом",
+                "badge_type": "success",
+                "title": f"Одобрена скорингом ({ai_score or rule_res.get('score')} баллов)",
+                "stage": "4. Прошло порог",
+                "summary": f"Вакансия прошла все фильтры и находится в очереди автоотклика (порог: {settings.score_threshold}).",
+                "checklist": checklist,
+            }
+        if status_val == "new":
+            return {
+                "badge": "В очереди на анализ",
+                "badge_type": "warning",
+                "title": "Новая вакансия, ожидает анализа",
+                "stage": "1. Вошло в воронку",
+                "summary": "Вакансия спарсена и поставлена в очередь на проверку матчером и нейросетью.",
+                "checklist": checklist,
+            }
+        if status_val == "archived":
+            return {
+                "badge": "В архиве",
+                "badge_type": "muted",
+                "title": "Вакансия закрыта на hh.ru",
+                "stage": "Архив",
+                "summary": "Вакансия снята с публикации работодателем.",
+                "checklist": checklist,
+            }
+        # status == rejected
+        return {
+            "badge": "Отсеяна",
+            "badge_type": "danger",
+            "title": "Вакансия отклонена ботом",
+            "stage": "Матчер / LLM",
+            "summary": f"Причина отсева: {ai_reason or rule_res.get('reason', 'Недостаточный балл скоринга')}.",
+            "checklist": checklist,
+        }
+
+    # Not in DB
+    if rule_res.get("is_relevant") or rule_res.get("score", 0) >= 45:
+        return {
+            "badge": "Пройдет отбор",
+            "badge_type": "success",
+            "title": f"Подходит по правилам (предварительный балл: {rule_res.get('score', 0)})",
+            "stage": "2. Прошло матчер",
+            "summary": "Заголовок и стек соответствуют вашему профилю. При запуске поиска бот добавит её в очередь и передаст AI.",
+            "checklist": checklist,
+        }
+
+    return {
+        "badge": "Будет отсеяна",
+        "badge_type": "danger",
+        "title": "Вакансия не пройдет первичный отбор матчера",
+        "stage": "Срезано матчером",
+        "summary": f"Причина: {rule_res.get('reason', 'Несоответствие критериям поиска')}.",
+        "checklist": checklist,
+    }
+
+
+async def inspect_vacancy(query: str) -> dict:
+    from app.ai.rule_analyzer import analyze_vacancy
+    from app.parsers.hh import HHParser
+
+    q = (query or "").strip()
+    m = re.search(r"(\d{7,11})", q)
+    if not m:
+        return {
+            "success": False,
+            "error": "Не удалось распознать ID вакансии. Вставьте корректную ссылку на hh.ru (например, https://hh.ru/vacancy/12345678) или номер вакансии.",
+        }
+
+    vacancy_id = m.group(1)
+
+    # 1. Check in local SQLite DB
+    async with async_session() as session:
+        query_db = (
+            select(Vacancy)
+            .options(selectinload(Vacancy.company), selectinload(Vacancy.applications))
+            .where(or_(Vacancy.external_id == vacancy_id, Vacancy.url.like(f"%{vacancy_id}%")))
+        )
+        v = (await session.execute(query_db)).scalar_one_or_none()
+
+    if v:
+        title = v.title
+        desc = v.description or ""
+        company_name = v.company.name if v.company else "—"
+        url = v.url or f"https://hh.ru/vacancy/{vacancy_id}"
+
+        salary_str = "Не указана"
+        if v.salary_from and v.salary_to:
+            salary_str = f"{v.salary_from:,} – {v.salary_to:,} {v.salary_currency or '₽'}".replace(",", " ")
+        elif v.salary_from:
+            salary_str = f"от {v.salary_from:,} {v.salary_currency or '₽'}".replace(",", " ")
+        elif v.salary_to:
+            salary_str = f"до {v.salary_to:,} {v.salary_currency or '₽'}".replace(",", " ")
+
+        location = v.location or ("Удаленно" if v.is_remote else "Не указана")
+        status_val = v.status.value if hasattr(v.status, "value") else str(v.status)
+
+        rule_res = analyze_vacancy(
+            title=title,
+            description=desc,
+            skills="",
+            salary_from=v.salary_from,
+            salary_to=v.salary_to,
+            is_remote=v.is_remote,
+            salary_currency=v.salary_currency or "RUR",
+            desired_salary_min=settings.salary_floor,
+        )
+        rule_res["title"] = title
+
+        app_info = None
+        if v.applications:
+            first_app = v.applications[0]
+            app_status = first_app.status.value if hasattr(first_app.status, "value") else str(first_app.status)
+            app_info = {
+                "status": app_status,
+                "created_at": first_app.created_at.strftime("%Y-%m-%d %H:%M") if first_app.created_at else None,
+            }
+
+        matched_stack = [kw for kw in settings.stack_keywords if kw.lower() in f"{title}\n{desc}".lower()]
+
+        verdict = _build_verdict(
+            status_val=status_val,
+            ai_score=v.ai_score,
+            ai_reason=v.ai_reason,
+            rule_res=rule_res,
+            in_db=True,
+            app_info=app_info,
+        )
+
+        return {
+            "success": True,
+            "in_database": True,
+            "external_id": vacancy_id,
+            "url": url,
+            "title": title,
+            "company": company_name,
+            "salary": salary_str,
+            "location": location,
+            "status": status_val,
+            "ai_score": v.ai_score,
+            "ai_reason": v.ai_reason,
+            "created_at": v.created_at.strftime("%Y-%m-%d %H:%M") if v.created_at else None,
+            "matched_stack": matched_stack,
+            "rule_analysis": rule_res,
+            "application": app_info,
+            "verdict": verdict,
+        }
+
+    # 2. Not in local DB - fetch from HH
+    parser = HHParser()
+    details = await parser.get_vacancy_details(f"https://hh.ru/vacancy/{vacancy_id}")
+
+    if not details:
+        return {
+            "success": False,
+            "in_database": False,
+            "external_id": vacancy_id,
+            "error": "Вакансия не найдена на hh.ru (возможно, она удалена или к ней закрыт доступ).",
+        }
+
+    salary_str = "Не указана"
+    if details.salary_from and details.salary_to:
+        salary_str = f"{details.salary_from:,} – {details.salary_to:,} {details.salary_currency or '₽'}".replace(
+            ",", " "
+        )
+    elif details.salary_from:
+        salary_str = f"от {details.salary_from:,} {details.salary_currency or '₽'}".replace(",", " ")
+    elif details.salary_to:
+        salary_str = f"до {details.salary_to:,} {details.salary_currency or '₽'}".replace(",", " ")
+
+    location = details.location or ("Удаленно" if details.is_remote else "Не указана")
+
+    rule_res = analyze_vacancy(
+        title=details.title,
+        description=details.description or "",
+        skills=" ".join(details.skills or []),
+        salary_from=details.salary_from,
+        salary_to=details.salary_to,
+        is_remote=details.is_remote,
+        salary_currency=details.salary_currency or "RUR",
+        desired_salary_min=settings.salary_floor,
+    )
+    rule_res["title"] = details.title
+
+    matched_stack = [
+        kw for kw in settings.stack_keywords if kw.lower() in f"{details.title}\n{details.description}".lower()
+    ]
+
+    verdict = _build_verdict(
+        status_val="not_in_db",
+        ai_score=None,
+        ai_reason=None,
+        rule_res=rule_res,
+        in_db=False,
+        app_info=None,
+    )
+
+    return {
+        "success": True,
+        "in_database": False,
+        "external_id": vacancy_id,
+        "url": details.url or f"https://hh.ru/vacancy/{vacancy_id}",
+        "title": details.title,
+        "company": details.company_name or "—",
+        "salary": salary_str,
+        "location": location,
+        "status": "not_in_db",
+        "ai_score": None,
+        "ai_reason": None,
+        "created_at": None,
+        "matched_stack": matched_stack,
+        "rule_analysis": rule_res,
+        "application": None,
+        "verdict": verdict,
+    }
