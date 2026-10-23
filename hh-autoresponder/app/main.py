@@ -172,9 +172,28 @@ async def main():
         else:
             log.error("proxy_unreachable_after_retries")
 
+    # Start Web Dashboard
+    dashboard_runner = None
+    if getattr(settings, "dashboard_enabled", True):
+        try:
+            from app.dashboard.server import start_dashboard
+
+            dashboard_runner = await start_dashboard(
+                host=getattr(settings, "dashboard_host", "127.0.0.1"),
+                port=getattr(settings, "dashboard_port", 8080),
+            )
+            log.info("dashboard_running", url=f"http://{settings.dashboard_host}:{settings.dashboard_port}")
+        except Exception as e:
+            log.warning("dashboard_start_failed", error=str(e))
+
     try:
         await dp.start_polling(bot)
     finally:
+        if dashboard_runner:
+            try:
+                await dashboard_runner.cleanup()
+            except Exception as e:
+                log.warning("dashboard_cleanup_error", error=str(e))
         scheduler.stop()
         if playwright_ok:
             await browser_manager.close()

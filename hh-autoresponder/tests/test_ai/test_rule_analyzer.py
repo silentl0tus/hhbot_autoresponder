@@ -1,5 +1,4 @@
-from app.ai.rule_analyzer import _match_any_re, LEVEL_SENIOR, LEVEL_MIDDLE
-from app.ai.rule_analyzer import analyze_vacancy
+from app.ai.rule_analyzer import LEVEL_MIDDLE, LEVEL_SENIOR, _match_any_re, analyze_vacancy
 
 
 def test_senior_level_disqualification(mocker):
@@ -58,8 +57,8 @@ def test_senior_in_title_disqualified_even_if_description_mentions_middle(mocker
     assert "senior_level" in res["red_flags"]
 
 
-def test_veduschy_title_disqualified(mocker):
-    """Тест: 'ведущий' в заголовке = Senior уровень, должен отсекаться."""
+def test_veduschy_title_allowed(mocker):
+    """Тест: 'ведущий' в заголовке разрешен (соответствует уровню кандидата)."""
     mocker.patch(
         "app.ai.rule_analyzer.settings",
         target_keywords=["маркетолог", "маркетинг", "performance"],
@@ -68,8 +67,8 @@ def test_veduschy_title_disqualified(mocker):
     )
     title = "Ведущий маркетолог перформанс"
     res = analyze_vacancy(title, "", skills="")
-    assert res["score"] == 0
-    assert "senior_level" in res["red_flags"]
+    assert res["score"] > 0
+    assert "senior_level" not in res["red_flags"]
 
 
 def test_expert_title_disqualified(mocker):

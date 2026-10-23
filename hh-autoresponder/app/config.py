@@ -140,6 +140,11 @@ class Settings(BaseSettings):
     # ── База ──────────────────────────────────────────────────
     database_url: str = "sqlite+aiosqlite:///data/jobhunter.db"
 
+    # ── Дашборд ───────────────────────────────────────────────
+    dashboard_enabled: bool = True
+    dashboard_host: str = "127.0.0.1"
+    dashboard_port: int = 8080
+
     # ── Уведомления (тихие часы, МСК) ─────────────────────────
     notify_hour_start: int = 9
     notify_hour_end: int = 22  # нижняя граница конца рабочего дня

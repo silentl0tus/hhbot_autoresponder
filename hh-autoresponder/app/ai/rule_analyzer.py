@@ -19,7 +19,6 @@ from app.config import settings
 LEVEL_MIDDLE = [r"\bmiddle\b", r"\bmid\b", r"\bсредн"]
 LEVEL_SENIOR = [
     r"\bsenior\b",
-    r"\bстарш",
     r"\bлид\b",
     r"\blead\b",
     r"\bhead\b",
@@ -38,7 +37,6 @@ LEVEL_SENIOR_TITLE_EXTRA = [
     r"\bэксперт\b",
     r"\bteam\s*lead\b",
     r"\btech\s*lead\b",
-    r"ведущий",
     r"главный",
 ]
 
