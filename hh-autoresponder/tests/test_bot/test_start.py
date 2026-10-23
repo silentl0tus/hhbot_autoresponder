@@ -1,4 +1,5 @@
 import pytest
+
 from app.bot.handlers import cmd_start
 
 
@@ -15,4 +16,4 @@ async def test_cmd_start_handler(mock_message, mocker):
 
     # Проверяем, что в ответе есть приветствие
     call_args = mock_message.answer.call_args[0][0]
-    assert "👋 <b>Job Hunter Bot v1.6.0</b>" in call_args
+    assert "👋 <b>Job Hunter Bot v1.7.0</b>" in call_args

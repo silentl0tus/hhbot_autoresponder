@@ -1,12 +1,13 @@
 [project]
 name = "hh-autoresponder"
-version = "1.6.0"
-description = "Telegram-бот авто-откликов на вакансии hh.ru (config-driven, AI опционален)"
+version = "1.7.0"
+description = "Telegram-бот и веб-дашборд авто-откликов на вакансии hh.ru (config-driven, AI опционален)"
 requires-python = ">=3.12"
 dependencies = [
     "sqlalchemy[asyncio]>=2.0.36",
     "aiosqlite>=0.20.0",
     "aiogram>=3.14.0",
+    "aiohttp>=3.9.0",
     "httpx[socks]>=0.28.0",
     "pydantic>=2.10.0",
     "pydantic-settings>=2.6.0",
