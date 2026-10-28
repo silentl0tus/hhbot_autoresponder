@@ -97,6 +97,127 @@ class TunnelManager:
 
         return None
 
+    async def _start_ssh_tunnel(self, port: int) -> str | None:
+        """Start an SSH reverse tunnel via pinggy (port 443).
+
+        Does not require external binaries or DNS SRV records, bypassing ISP/RKN blocks on argotunnel.com.
+        """
+        ssh_bin = shutil.which("ssh")
+        if not ssh_bin:
+            return None
+
+        cmd = [
+            ssh_bin,
+            "-p",
+            "443",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "ServerAliveInterval=30",
+            "-o",
+            "ConnectTimeout=10",
+            f"-R0:127.0.0.1:{port}",
+            "a.pinggy.io",
+        ]
+        log.info("starting_ssh_tunnel", port=port)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            self._process = proc
+
+            url_pattern = re.compile(r"https://[a-zA-Z0-9-]+\.(?:free\.pinggy\.net|run\.pinggy-free\.link)")
+            url_found = asyncio.Event()
+
+            async def monitor_ssh(stream):
+                try:
+                    while proc.returncode is None:
+                        line = await stream.readline()
+                        if not line:
+                            break
+                        text = line.decode(errors="ignore")
+                        match = url_pattern.search(text)
+                        if match and not self._public_url:
+                            self._public_url = match.group(0)
+                            url_found.set()
+                            log.info("ssh_tunnel_ready", url=self._public_url)
+                except Exception as e:  # noqa: BLE001
+                    log.debug("ssh_stream_monitor_stopped", error=str(e))
+
+            if proc.stdout:
+                self._drain_tasks.append(asyncio.create_task(monitor_ssh(proc.stdout)))
+
+            try:
+                await asyncio.wait_for(url_found.wait(), timeout=12)
+            except TimeoutError:
+                log.warning("ssh_tunnel_timeout")
+
+        except Exception as e:  # noqa: BLE001
+            log.warning("ssh_tunnel_start_error", error=str(e))
+
+        return self._public_url
+
+    async def _start_cloudflared_tunnel(self, port: int) -> str | None:
+        """Start a cloudflared quick tunnel."""
+        binary = await self._find_or_download_binary()
+        if not binary:
+            return None
+
+        self._ensure_resolv_conf()
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                binary,
+                "--edge-ip-version",
+                "4",
+                "tunnel",
+                "--protocol",
+                "http2",
+                "--no-autoupdate",
+                "--url",
+                f"http://127.0.0.1:{port}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            self._process = proc
+
+            url_pattern = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
+            url_found = asyncio.Event()
+
+            async def monitor_stream(stream):
+                try:
+                    while proc.returncode is None:
+                        line = await stream.readline()
+                        if not line:
+                            break
+                        text = line.decode(errors="ignore")
+                        match = url_pattern.search(text)
+                        if match and not self._public_url:
+                            self._public_url = match.group(0)
+                            url_found.set()
+                            log.info("cloudflared_tunnel_ready", url=self._public_url)
+                        elif "ERR" in text or "error" in text.lower():
+                            log.warning("cloudflared_stream_log", line=text.strip())
+                except Exception as e:  # noqa: BLE001
+                    log.debug("stream_monitor_stopped", error=str(e))
+
+            if proc.stderr:
+                self._drain_tasks.append(asyncio.create_task(monitor_stream(proc.stderr)))
+            if proc.stdout:
+                self._drain_tasks.append(asyncio.create_task(monitor_stream(proc.stdout)))
+
+            try:
+                await asyncio.wait_for(url_found.wait(), timeout=15)
+            except TimeoutError:
+                log.warning("cloudflared_tunnel_timeout")
+
+        except Exception as e:  # noqa: BLE001
+            log.error("cloudflared_start_error", error=str(e))
+
+        return self._public_url
+
     async def get_or_start_tunnel(self, force_restart: bool = False) -> str | None:
         """Return public URL (from config, existing active tunnel, or start new)."""
         # 1. Configured static URL has highest priority
@@ -114,64 +235,15 @@ class TunnelManager:
             if not getattr(settings, "dashboard_auto_tunnel", True):
                 return None
 
-            binary = await self._find_or_download_binary()
-            if not binary:
-                return None
-
-            self._ensure_resolv_conf()
-
             port = getattr(settings, "dashboard_port", 8080)
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    binary,
-                    "--edge-ip-version",
-                    "4",
-                    "tunnel",
-                    "--protocol",
-                    "http2",
-                    "--no-autoupdate",
-                    "--url",
-                    f"http://127.0.0.1:{port}",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                self._process = proc
 
-                url_pattern = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
-                url_found = asyncio.Event()
+            # Try SSH tunnel (pinggy) first - immune to Russian ISP blocks of argotunnel.com
+            ssh_url = await self._start_ssh_tunnel(port)
+            if ssh_url and self._process and self._process.returncode is None:
+                return ssh_url
 
-                async def monitor_stream(stream):
-                    try:
-                        while proc.returncode is None:
-                            line = await stream.readline()
-                            if not line:
-                                break
-                            text = line.decode(errors="ignore")
-                            match = url_pattern.search(text)
-                            if match and not self._public_url:
-                                self._public_url = match.group(0)
-                                url_found.set()
-                                log.info("cloudflared_tunnel_ready", url=self._public_url)
-                            elif "ERR" in text or "error" in text.lower():
-                                log.warning("cloudflared_stream_log", line=text.strip())
-                    except Exception as e:  # noqa: BLE001
-                        log.debug("stream_monitor_stopped", error=str(e))
-
-                if proc.stderr:
-                    self._drain_tasks.append(asyncio.create_task(monitor_stream(proc.stderr)))
-                if proc.stdout:
-                    self._drain_tasks.append(asyncio.create_task(monitor_stream(proc.stdout)))
-
-                # Wait up to 15 seconds for tunnel URL
-                try:
-                    await asyncio.wait_for(url_found.wait(), timeout=15)
-                except TimeoutError:
-                    log.warning("cloudflared_tunnel_timeout")
-
-            except Exception as e:  # noqa: BLE001
-                log.error("cloudflared_start_error", error=str(e))
-
-            return self._public_url
+            # Fallback to cloudflared
+            return await self._start_cloudflared_tunnel(port)
 
     def stop(self):
         """Stop running tunnel process and background reader tasks."""
