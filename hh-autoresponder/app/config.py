@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
@@ -63,6 +64,23 @@ class Settings(BaseSettings):
     desired_salary_min: int = 150000
     desired_salary_max: int = 400000
     resume_text_path: str = "configs/resume.txt"
+    english_level: str = "B2"
+    relocation_ready: bool = False
+    business_trips_ready: bool = False
+    notice_period: str = "2 недели"
+
+    @field_validator("relocation_ready", "business_trips_ready", mode="before")
+    @classmethod
+    def _parse_candidate_bool_flags(cls, v: Any) -> bool:
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            clean = v.strip().lower()
+            if clean in ("true", "1", "yes", "да", "готов", "согласен"):
+                return True
+            if clean in ("false", "0", "no", "нет", "не готов", "не согласен"):
+                return False
+        return bool(v)
 
     # ── Поисковые запросы (через запятую) ─────────────────────
     search_queries_raw: str = "performance маркетолог, интернет-маркетолог, директолог"
