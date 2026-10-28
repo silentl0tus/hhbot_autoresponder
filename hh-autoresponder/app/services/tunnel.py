@@ -36,6 +36,20 @@ class TunnelManager:
     def public_url(self) -> str | None:
         return self._public_url
 
+    @staticmethod
+    def _ensure_resolv_conf() -> None:
+        """Ensure /etc/resolv.conf contains Cloudflare DNS (1.1.1.1) to avoid SRV query SERVFAIL."""
+        resolv = Path("/etc/resolv.conf")
+        try:
+            if resolv.exists() and os.access(resolv, os.W_OK):
+                content = resolv.read_text(encoding="utf-8")
+                if "1.1.1.1" not in content:
+                    new_content = f"nameserver 1.1.1.1\nnameserver 1.0.0.1\n{content}"
+                    resolv.write_text(new_content, encoding="utf-8")
+                    log.info("resolv_conf_updated_with_cloudflare_dns")
+        except Exception as e:  # noqa: BLE001
+            log.debug("resolv_conf_update_skipped", error=str(e))
+
     def get_local_url(self) -> str:
         port = getattr(settings, "dashboard_port", 8080)
         host = getattr(settings, "dashboard_host", "127.0.0.1")
@@ -93,10 +107,14 @@ class TunnelManager:
             if not binary:
                 return None
 
+            self._ensure_resolv_conf()
+
             port = getattr(settings, "dashboard_port", 8080)
             try:
                 proc = await asyncio.create_subprocess_exec(
                     binary,
+                    "--edge-ip-version",
+                    "4",
                     "tunnel",
                     "--protocol",
                     "http2",
