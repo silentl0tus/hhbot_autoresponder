@@ -165,6 +165,8 @@ class Settings(BaseSettings):
     dashboard_enabled: bool = True
     dashboard_host: str = "127.0.0.1"
     dashboard_port: int = 8080
+    dashboard_public_url: str = ""
+    dashboard_auto_tunnel: bool = True
 
     # ── Уведомления (тихие часы, МСК) ─────────────────────────
     notify_hour_start: int = 9

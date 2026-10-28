@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import functools
 import structlog
 import html as _html
@@ -36,7 +37,9 @@ from app.bot.keyboards import (
     hh_chat_menu_keyboard,
     hh_chat_list_keyboard,
     custom_ai_keyboard,
+    dashboard_keyboard,
 )
+from app.services.tunnel import tunnel_manager
 from app.parsers.max_screener import max_screener
 from app.parsers.hh_chat import hh_chat_parser
 
@@ -261,6 +264,56 @@ async def btn_inbox(message: Message, **kw):
     data = await collect_inbox(_scheduler)
     text = format_inbox(data, heading=True)
     await message.answer(text, parse_mode="HTML")
+
+
+@router.message(F.text.in_(["🌐 Дашборд", "Дашборд", "📊 Дашборд"]))
+@router.message(Command("dashboard"))
+@admin_only
+async def btn_dashboard(message: Message, **kw):
+    wait_msg = await message.answer("⏳ <i>Подключаю и проверяю ссылку на дашборд...</i>", parse_mode="HTML")
+    public_url = await tunnel_manager.get_or_start_tunnel()
+    local_url = tunnel_manager.get_local_url()
+
+    text_parts = [
+        "📊 <b>Веб-дашборд Job Hunter</b>\n\n",
+        "Интерфейс для детального просмотра вакансий, аналитики, фильтрации и перезапуска откликов.\n\n",
+    ]
+    if public_url:
+        text_parts.append(f"🌐 <b>Удалённый доступ (из любой точки мира):</b>\n<code>{public_url}</code>\n\n")
+    else:
+        text_parts.append(
+            "🌐 <i>Удалённый туннель не запущен (установите cloudflared или укажите DASHBOARD_PUBLIC_URL в .env)</i>\n\n"
+        )
+
+    text_parts.append(f"🏠 <b>Локальный доступ (с того же устройства / Wi-Fi):</b>\n<code>{local_url}</code>")
+
+    kb = dashboard_keyboard(url=public_url or local_url)
+    await wait_msg.edit_text("".join(text_parts), reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "dash_refresh")
+@admin_only
+async def cb_dashboard_refresh(call: CallbackQuery, **kw):
+    await call.answer("🔄 Обновляю туннель дашборда...")
+    public_url = await tunnel_manager.get_or_start_tunnel(force_restart=True)
+    local_url = tunnel_manager.get_local_url()
+
+    text_parts = [
+        "📊 <b>Веб-дашборд Job Hunter</b>\n\n",
+        "Интерфейс для детального просмотра вакансий, аналитики, фильтрации и перезапуска откликов.\n\n",
+    ]
+    if public_url:
+        text_parts.append(f"🌐 <b>Удалённый доступ (из любой точки мира):</b>\n<code>{public_url}</code>\n\n")
+    else:
+        text_parts.append(
+            "🌐 <i>Удалённый туннель не запущен (установите cloudflared или укажите DASHBOARD_PUBLIC_URL в .env)</i>\n\n"
+        )
+
+    text_parts.append(f"🏠 <b>Локальный доступ (с того же устройства / Wi-Fi):</b>\n<code>{local_url}</code>")
+
+    kb = dashboard_keyboard(url=public_url or local_url)
+    with contextlib.suppress(Exception):
+        await call.message.edit_text("".join(text_parts), reply_markup=kb, parse_mode="HTML")
 
 
 @router.message(F.text == "🔍 Вакансии")

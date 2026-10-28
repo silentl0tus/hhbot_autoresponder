@@ -10,12 +10,20 @@ def main_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🔍 Вакансии"), KeyboardButton(text="📊 Статистика")],
-            [KeyboardButton(text="📌 Что дальше"), KeyboardButton(text="📩 Сообщения")],
-            [KeyboardButton(text="⚙️ Настройки"), KeyboardButton(text="📋 Логи")],
-            [KeyboardButton(text="📝 Создать сопроводительное")],
+            [KeyboardButton(text="🌐 Дашборд"), KeyboardButton(text="📩 Сообщения")],
+            [KeyboardButton(text="📌 Что дальше"), KeyboardButton(text="📋 Логи")],
+            [KeyboardButton(text="⚙️ Настройки"), KeyboardButton(text="📝 Создать сопроводительное")],
         ],
         resize_keyboard=True,
     )
+
+
+def dashboard_keyboard(url: str | None = None) -> InlineKeyboardMarkup:
+    buttons = []
+    if url and url.startswith(("http://", "https://")):
+        buttons.append([InlineKeyboardButton(text="🚀 Открыть дашборд", url=url)])
+    buttons.append([InlineKeyboardButton(text="🔄 Обновить ссылку", callback_data="dash_refresh")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def vacancy_keyboard(vacancy_id: int) -> InlineKeyboardMarkup:

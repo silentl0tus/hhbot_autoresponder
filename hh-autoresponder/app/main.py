@@ -93,6 +93,7 @@ async def main():
     await bot.set_my_commands(
         [
             BotCommand(command="start", description="🏠 Главное меню"),
+            BotCommand(command="dashboard", description="🌐 Веб-дашборд"),
             BotCommand(command="stats", description="📊 Статистика"),
             BotCommand(command="vacancies", description="🔍 Найденные вакансии"),
             BotCommand(command="messages", description="📩 Сообщения рекрутёров"),
@@ -189,6 +190,12 @@ async def main():
     try:
         await dp.start_polling(bot)
     finally:
+        try:
+            from app.services.tunnel import tunnel_manager
+
+            tunnel_manager.stop()
+        except Exception as e:
+            log.warning("tunnel_stop_failed", error=str(e))
         if dashboard_runner:
             try:
                 await dashboard_runner.cleanup()
