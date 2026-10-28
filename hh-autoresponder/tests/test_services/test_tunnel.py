@@ -48,10 +48,14 @@ async def test_tunnel_manager_starts_cloudflared(monkeypatch):
     mock_stdout.readline = mock_readline_stdout
     mock_proc.stdout = mock_stdout
 
-    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)):
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)) as mock_exec:
         url = await mgr.get_or_start_tunnel()
         assert url == "https://random-test-subdomain.trycloudflare.com"
         assert mgr.public_url == "https://random-test-subdomain.trycloudflare.com"
+        mock_exec.assert_called_once()
+        exec_args = mock_exec.call_args[0]
+        assert "--protocol" in exec_args
+        assert "http2" in exec_args
 
         mgr.stop()
         mock_proc.terminate.assert_called_once()

@@ -98,6 +98,9 @@ class TunnelManager:
                 proc = await asyncio.create_subprocess_exec(
                     binary,
                     "tunnel",
+                    "--protocol",
+                    "http2",
+                    "--no-autoupdate",
                     "--url",
                     f"http://127.0.0.1:{port}",
                     stdout=asyncio.subprocess.PIPE,
@@ -120,6 +123,8 @@ class TunnelManager:
                                 self._public_url = match.group(0)
                                 url_found.set()
                                 log.info("cloudflared_tunnel_ready", url=self._public_url)
+                            elif "ERR" in text or "error" in text.lower():
+                                log.warning("cloudflared_stream_log", line=text.strip())
                     except Exception as e:  # noqa: BLE001
                         log.debug("stream_monitor_stopped", error=str(e))
 
