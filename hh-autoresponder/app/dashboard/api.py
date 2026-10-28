@@ -122,48 +122,48 @@ async def get_dashboard_stats() -> dict:
                 label = label[:60] + "..."
             reasons_breakdown.append({"reason": label, "count": count})
 
+        # 6-Stage Sofi-style conversion funnel
+        # Matcher rejects: rejected by title, stop-words, senior grade or location
+        dropped_matcher = (
+            await session.scalar(
+                select(func.count(Vacancy.id)).where(
+                    Vacancy.status == VacancyStatus.REJECTED,
+                    or_(
+                        Vacancy.ai_score.is_(None),
+                        Vacancy.ai_score == 0,
+                        Vacancy.ai_reason.like("%Дисквалифицировано%"),
+                        Vacancy.ai_reason.like("%Заголовок не%"),
+                        Vacancy.ai_reason.like("%стоп-слов%"),
+                        Vacancy.ai_reason.like("%Превышен%"),
+                        Vacancy.ai_reason.like("%Локация%"),
+                    ),
+                )
+            )
+            or 0
+        )
+        passed_matcher = max(0, total_vacancies - dropped_matcher)
+
+        # Approved/applied/interview/response passed threshold
+        passed_threshold = approved_vacancies + applied_vacancies + interview_vacancies + response_vacancies
+
+        # Low LLM scores
+        low_llm = (
+            await session.scalar(
+                select(func.count(Vacancy.id)).where(
+                    Vacancy.status == VacancyStatus.REJECTED,
+                    Vacancy.ai_score.is_not(None),
+                    Vacancy.ai_score < settings.score_threshold,
+                )
+            )
+            or 0
+        )
+
     # Sessions health
     sessions = {
         "hh": _check_session_health("data/browser_sessions/hh_state.json"),
         "habr": _check_session_health("data/browser_sessions/habr_state.json"),
         "max": _check_session_health("data/browser_sessions/max_state.json"),
     }
-
-    # 6-Stage Sofi-style conversion funnel
-    # Matcher rejects: rejected by title, stop-words, senior grade or location
-    dropped_matcher = (
-        await session.scalar(
-            select(func.count(Vacancy.id)).where(
-                Vacancy.status == VacancyStatus.REJECTED,
-                or_(
-                    Vacancy.ai_score.is_(None),
-                    Vacancy.ai_score == 0,
-                    Vacancy.ai_reason.like("%Дисквалифицировано%"),
-                    Vacancy.ai_reason.like("%Заголовок не%"),
-                    Vacancy.ai_reason.like("%стоп-слов%"),
-                    Vacancy.ai_reason.like("%Превышен%"),
-                    Vacancy.ai_reason.like("%Локация%"),
-                ),
-            )
-        )
-        or 0
-    )
-    passed_matcher = max(0, total_vacancies - dropped_matcher)
-
-    # Approved/applied/interview/response passed threshold
-    passed_threshold = approved_vacancies + applied_vacancies + interview_vacancies + response_vacancies
-
-    # Low LLM scores
-    low_llm = (
-        await session.scalar(
-            select(func.count(Vacancy.id)).where(
-                Vacancy.status == VacancyStatus.REJECTED,
-                Vacancy.ai_score.is_not(None),
-                Vacancy.ai_score < settings.score_threshold,
-            )
-        )
-        or 0
-    )
     passed_llm = passed_matcher - (low_llm // 2)
     if passed_llm < passed_threshold:
         passed_llm = passed_threshold + (low_llm // 3)
