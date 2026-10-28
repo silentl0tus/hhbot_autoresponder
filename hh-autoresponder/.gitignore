@@ -1,8 +1,10 @@
 # секреты и локальные данные
 .env
 configs/resume.txt
+configs/resume_3ver.txt
 configs/*.json
 configs/*.json.json
+configs/*.tex
 
 # рантайм-данные (база, сессии браузера, токены, маркеры)
 data/

@@ -4,6 +4,7 @@ HH.ru API client — fast applies via direct HTTP requests
 
 Скорость: ~1 сек на отклик вместо 60-90 сек.
 """
+
 from __future__ import annotations
 
 import json
@@ -13,6 +14,7 @@ from pathlib import Path
 
 import httpx
 import structlog
+from bs4 import BeautifulSoup
 
 from app.config import settings
 
@@ -57,6 +59,33 @@ def _randomize_letter(text: str) -> str:
     if random.random() < 0.5:
         text = text.replace(". ", ".  ", 1) if ". " in text else text
     return text
+
+
+def extract_negotiation_vacancy_ids(html: str) -> set[str]:
+    """Extract vacancy IDs strictly from user negotiations cards,
+    ignoring recommended vacancies and other widgets."""
+    ids: set[str] = set()
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        items = soup.find_all(attrs={"data-qa": lambda v: v and "negotiations-item" in v})
+        for it in items:
+            link = it.find("a", href=re.compile(r"/vacancy/(\d+)"))
+            if link and link.get("href"):
+                m = re.search(r"/vacancy/(\d+)", str(link.get("href", "")))
+                if m:
+                    ids.add(m.group(1))
+    except Exception as e:  # noqa: BLE001
+        log.warning("hh_api_bs4_extract_error", error=str(e))
+
+    if not ids:
+        # Fallback regex: find vacancy links with hhtmFrom=negotiation_list
+        # while excluding recommendation labels
+        for m in re.finditer(r'href=["\'](?:https?://[^/\s"\']+)?/vacancy/(\d+)[^"\']*["\']', html):
+            href = m.group(0)
+            if "hhtmFrom=negotiation_list" in href and "suitable_vacancies" not in href and "recommend" not in href:
+                ids.add(m.group(1))
+
+    return ids
 
 
 class HHApiClient:
@@ -116,7 +145,7 @@ class HHApiClient:
             headers=_headers(self._xsrf, accept_html=True),
             timeout=25,
         ) as c:
-            for page in range(0, 30):  # up to ~30 pages of negotiations
+            for page in range(30):  # up to ~30 pages of negotiations
                 try:
                     r = await c.get(
                         "https://hh.ru/applicant/negotiations",
@@ -131,22 +160,22 @@ class HHApiClient:
                 body = r.text or ""
                 if not body:
                     break
-                # Extract vacancy IDs from URLs in markup
-                page_ids = set(re.findall(r"/vacancy/(\d+)", body))
-                # Filter out IDs that may appear in nav/recommendations
-                # (these usually appear in /vacancy/ links inside negotiation cards)
+                # Extract vacancy IDs strictly from negotiation cards (filtering out recommendations)
+                page_ids = extract_negotiation_vacancy_ids(body)
                 new_ids = page_ids - ids
                 if not new_ids and page > 0:
                     # No new ids on this page → end
                     break
                 ids |= page_ids
-                # No pagination marker — break if page got generic markup
-                if len(page_ids) < 5 and page > 0:
+                # If page returned fewer items than the standard page size (20), we reached the end
+                if len(page_ids) < 20:
                     break
         log.info("hh_api_fetched_applied_ids", count=len(ids))
         return ids
 
-    async def apply(self, vacancy_id: str, cover_letter: str, resume_hash: str | None = None) -> tuple[bool | str, dict]:
+    async def apply(
+        self, vacancy_id: str, cover_letter: str, resume_hash: str | None = None
+    ) -> tuple[bool | str, dict]:
         """Submit application via internal HH API.
 
         Returns (result, info):
@@ -198,7 +227,7 @@ class HHApiClient:
                 if "shortVacancy" in text or '"success":true' in text or '"responded":true' in text:
                     return True, {"status": 200}
                 # Login page check
-                if "data-qa=\"account-login\"" in text or "Войти на сайт" in text:
+                if 'data-qa="account-login"' in text or "Войти на сайт" in text:
                     return False, {"error": "auth_required"}
                 # Empty / unknown 200 — assume success
                 return True, {"status": 200, "note": "no_marker"}
