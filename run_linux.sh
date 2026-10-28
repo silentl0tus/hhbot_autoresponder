@@ -1,9 +1,16 @@
 #!/bin/bash
+# Функция паузы только при интерактивном запуске в терминале (чтобы PM2/демоны не зависали)
+pause_on_exit() {
+    if [ -t 0 ]; then
+        read -p "Нажмите Enter для выхода..."
+    fi
+}
+
 # Переходим в директорию, где лежит сам скрипт (важно для запуска из Наутилуса)
-cd "$(dirname "$0")" || { echo "Не удалось перейти в папку скрипта"; read -p "Нажмите Enter для выхода..."; exit 1; }
+cd "$(dirname "$0")" || { echo "Не удалось перейти в папку скрипта"; pause_on_exit; exit 1; }
 
 echo "Переход в папку проекта..."
-cd hh-autoresponder || { echo "Не удалось найти папку hh-autoresponder"; read -p "Нажмите Enter для выхода..."; exit 1; }
+cd hh-autoresponder || { echo "Не удалось найти папку hh-autoresponder"; pause_on_exit; exit 1; }
 
 # Обход ограничения PEP 668 (externally-managed-environment) при запуске под root в Ubuntu
 export PIP_BREAK_SYSTEM_PACKAGES=1
@@ -33,7 +40,7 @@ if [ ! -d ".venv" ]; then
         uv venv .venv 2>/dev/null || python3 -m venv .venv || {
             echo "КРИТИЧЕСКАЯ ОШИБКА: Не удалось создать .venv."
             echo "Установите пакет venv в систему: apt update && apt install -y python3-venv python3-pip"
-            read -p "Нажмите Enter для выхода..."
+            pause_on_exit
             exit 1
         }
     }
@@ -42,7 +49,7 @@ fi
 echo "Активация виртуального окружения..."
 source .venv/bin/activate || {
     echo "Не удалось активировать виртуальное окружение."
-    read -p "Нажмите Enter для выхода..."
+    pause_on_exit
     exit 1
 }
 
@@ -80,4 +87,4 @@ export ALL_PROXY="${ALL_PROXY/socks:\/\//socks5:\/\/}"
 python3 -m app.main
 
 echo "Работа скрипта завершена."
-read -p "Нажмите Enter для выхода..."
+pause_on_exit
