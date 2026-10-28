@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models.base import Base
@@ -248,3 +249,176 @@ async def test_run_auto_apply_marks_needs_test_as_rejected_and_notifies_user(tes
     notify_text = mock_notify_send.call_args[0][0]
     assert "https://hh.ru/vacancy/test_1" in notify_text
     assert "Senior QA Engineer" in notify_text
+
+
+@pytest.mark.asyncio
+async def test_run_auto_apply_respects_company_limit_of_two(test_session, mocker):
+    """Тест: бот не откликается больше чем на 2 вакансии в одну компанию,
+    а оставшиеся вакансии этой компании отклоняются с указанием лимита."""
+    mocker.patch("app.workers.apply_worker.async_session", test_session)
+    mocker.patch("app.workers.apply_worker.random_delay", new_callable=AsyncMock)
+    mocker.patch("app.workers.apply_worker.append_application", new_callable=AsyncMock)
+    mocker.patch("app.workers.apply_worker.sync_applied_from_hh", new_callable=AsyncMock)
+    mocker.patch("app.utils.notifier.vlog", new_callable=AsyncMock)
+
+    mock_apply = AsyncMock(return_value=True)
+    mocker.patch("app.workers.apply_worker.HHParser.login", new_callable=AsyncMock, return_value=True)
+    mocker.patch("app.workers.apply_worker.HHParser.apply_to_vacancy", mock_apply)
+
+    async with test_session() as session:
+        # Company 1: 4 approved vacancies
+        comp1 = Company(name="BigTech", platform="hh")
+        # Company 2: 2 approved vacancies
+        comp2 = Company(name="SmallTech", platform="hh")
+        session.add_all([comp1, comp2])
+        await session.flush()
+
+        for i in range(4):
+            v = Vacancy(
+                platform="hh",
+                external_id=f"bt_{i}",
+                title=f"Engineer BigTech {i}",
+                url=f"https://hh.ru/vacancy/bt_{i}",
+                company_id=comp1.id,
+                status=VacancyStatus.APPROVED,
+                ai_score=95.0 - i,
+                work_format="remote",
+            )
+            session.add(v)
+
+        for i in range(2):
+            v = Vacancy(
+                platform="hh",
+                external_id=f"st_{i}",
+                title=f"Engineer SmallTech {i}",
+                url=f"https://hh.ru/vacancy/st_{i}",
+                company_id=comp2.id,
+                status=VacancyStatus.APPROVED,
+                ai_score=80.0 - i,
+                work_format="remote",
+            )
+            session.add(v)
+        await session.commit()
+
+    # Target 10 (more than available)
+    applied = await run_auto_apply(auto_mode=False, min_score=50, target_count=10)
+
+    # BigTech: 2, SmallTech: 2 -> Total: 4
+    assert applied == 4
+    assert mock_apply.call_count == 4
+
+    async with test_session() as session:
+        from sqlalchemy import select
+
+        bt_applied = (
+            (
+                await session.execute(
+                    select(Vacancy).where(Vacancy.company_id == comp1.id, Vacancy.status == VacancyStatus.APPLIED)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(bt_applied) == 2
+
+        bt_rejected = (
+            (
+                await session.execute(
+                    select(Vacancy).where(Vacancy.company_id == comp1.id, Vacancy.status == VacancyStatus.REJECTED)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(bt_rejected) == 2
+        for r in bt_rejected:
+            assert "Лимит откликов в компанию (максимум 2)" in (r.ai_reason or "")
+
+        st_applied = (
+            (
+                await session.execute(
+                    select(Vacancy).where(Vacancy.company_id == comp2.id, Vacancy.status == VacancyStatus.APPLIED)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(st_applied) == 2
+
+
+@pytest.mark.asyncio
+async def test_run_auto_apply_skips_already_capped_company_on_start(test_session, mocker):
+    """Тест: если компания уже имеет 2 отклика до запуска run_auto_apply,
+    ее оставшиеся APPROVED вакансии отклоняются на старте и не отбираются."""
+    mocker.patch("app.workers.apply_worker.async_session", test_session)
+    mocker.patch("app.workers.apply_worker.random_delay", new_callable=AsyncMock)
+    mocker.patch("app.workers.apply_worker.append_application", new_callable=AsyncMock)
+    mocker.patch("app.workers.apply_worker.sync_applied_from_hh", new_callable=AsyncMock)
+    mocker.patch("app.utils.notifier.vlog", new_callable=AsyncMock)
+
+    mock_apply = AsyncMock(return_value=True)
+    mocker.patch("app.workers.apply_worker.HHParser.login", new_callable=AsyncMock, return_value=True)
+    mocker.patch("app.workers.apply_worker.HHParser.apply_to_vacancy", mock_apply)
+
+    async with test_session() as session:
+        comp_capped = Company(name="CappedCorp", platform="hh")
+        comp_fresh = Company(name="FreshCorp", platform="hh")
+        session.add_all([comp_capped, comp_fresh])
+        await session.flush()
+
+        # 2 already applied vacancies for CappedCorp
+        v_app1 = Vacancy(
+            platform="hh",
+            external_id="cc_app1",
+            title="Dev 1",
+            url="u1",
+            company_id=comp_capped.id,
+            status=VacancyStatus.APPLIED,
+            ai_score=90.0,
+        )
+        v_app2 = Vacancy(
+            platform="hh",
+            external_id="cc_app2",
+            title="Dev 2",
+            url="u2",
+            company_id=comp_capped.id,
+            status=VacancyStatus.APPLIED,
+            ai_score=89.0,
+        )
+        # 1 lingering approved vacancy for CappedCorp
+        v_cc_lingering = Vacancy(
+            platform="hh",
+            external_id="cc_lingering",
+            title="Dev 3",
+            url="u3",
+            company_id=comp_capped.id,
+            status=VacancyStatus.APPROVED,
+            ai_score=88.0,
+            work_format="remote",
+        )
+        # 1 approved vacancy for FreshCorp
+        v_fc = Vacancy(
+            platform="hh",
+            external_id="fc_1",
+            title="Fresh Dev",
+            url="u4",
+            company_id=comp_fresh.id,
+            status=VacancyStatus.APPROVED,
+            ai_score=80.0,
+            work_format="remote",
+        )
+        session.add_all([v_app1, v_app2, v_cc_lingering, v_fc])
+        await session.commit()
+
+    applied = await run_auto_apply(auto_mode=False, min_score=50, target_count=5)
+
+    assert applied == 1
+    assert mock_apply.call_count == 1
+
+    async with test_session() as session:
+        v_ling = await session.scalar(select(Vacancy).where(Vacancy.external_id == "cc_lingering"))
+        assert v_ling.status == VacancyStatus.REJECTED
+        assert "Лимит откликов в компанию (максимум 2)" in v_ling.ai_reason
+
+        v_fresh_db = await session.scalar(select(Vacancy).where(Vacancy.external_id == "fc_1"))
+        assert v_fresh_db.status == VacancyStatus.APPLIED

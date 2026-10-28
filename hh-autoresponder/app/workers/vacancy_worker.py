@@ -368,7 +368,15 @@ async def run_vacancy_analysis():
                     v.status = VacancyStatus.REJECTED
                     v.ai_reason = (v.ai_reason or "") + f" [порог {settings.score_threshold}]"
                 else:
-                    v.status = VacancyStatus.APPROVED
+                    from app.services.company_limit import is_company_capped
+
+                    if await is_company_capped(session, company_id=v.company_id):
+                        v.status = VacancyStatus.REJECTED
+                        v.ai_reason = (
+                            f"{v.ai_reason or ''} [Лимит откликов в компанию (максимум {settings.max_applies_per_company})]"
+                        ).strip()
+                    else:
+                        v.status = VacancyStatus.APPROVED
 
                 await session.commit()
 

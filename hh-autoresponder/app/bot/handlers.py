@@ -9,7 +9,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select, func
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 
 from app.config import settings, save_env_variable
 from app.database import async_session
@@ -1157,10 +1157,24 @@ async def cb_apply(callback: CallbackQuery, **kw):
     vacancy_id = int(callback.data.split(":")[1])
 
     async with async_session() as session:
-        vacancy = await session.get(Vacancy, vacancy_id)
+        vacancy = await session.scalar(
+            select(Vacancy).options(joinedload(Vacancy.company)).where(Vacancy.id == vacancy_id)
+        )
         if not vacancy:
             await callback.answer("Вакансия не найдена")
             return
+
+        from app.services.company_limit import count_company_applications, is_company_capped
+
+        if await is_company_capped(session, company_id=vacancy.company_id):
+            cnt = await count_company_applications(session, company_id=vacancy.company_id)
+            comp_name = _company_name(vacancy) or "компанию"
+            await callback.answer(
+                f"⚠️ В компанию «{comp_name}» уже отправлено {cnt} отклика (лимит: {settings.max_applies_per_company}).",
+                show_alert=True,
+            )
+            return
+
         title = vacancy.title
         desc = vacancy.description or ""
 
@@ -1285,9 +1299,22 @@ async def cb_confirm_apply(callback: CallbackQuery, **kw):
     vacancy_id = int(callback.data.split(":")[1])
 
     async with async_session() as session:
-        vacancy = await session.get(Vacancy, vacancy_id)
+        vacancy = await session.scalar(
+            select(Vacancy).options(joinedload(Vacancy.company)).where(Vacancy.id == vacancy_id)
+        )
         if not vacancy:
             await callback.answer("Вакансия не найдена")
+            return
+
+        from app.services.company_limit import count_company_applications, is_company_capped
+
+        if await is_company_capped(session, company_id=vacancy.company_id):
+            cnt = await count_company_applications(session, company_id=vacancy.company_id)
+            comp_name = _company_name(vacancy) or "компанию"
+            await callback.answer(
+                f"⚠️ Лимит откликов в компанию «{comp_name}» исчерпан ({cnt}/{settings.max_applies_per_company}).",
+                show_alert=True,
+            )
             return
 
     # Check if Playwright is available
@@ -1830,7 +1857,11 @@ async def cmd_test_apply(message: Message, **kw):
     await message.answer(f"🧪 Запускаю тест-отклики hh: {n} штук со скриншотами. Это займёт ~{n*2} мин.")
 
     async with async_session() as session:
-        result = await session.execute(
+        from app.services.company_limit import get_capped_companies
+        from sqlalchemy import or_
+
+        capped_ids, _ = await get_capped_companies(session)
+        q = (
             select(Vacancy)
             .options(selectinload(Vacancy.company))
             .where(
@@ -1838,9 +1869,11 @@ async def cmd_test_apply(message: Message, **kw):
                 Vacancy.status == VacancyStatus.APPROVED,
                 Vacancy.ai_score >= 70,
             )
-            .order_by(Vacancy.ai_score.desc())
-            .limit(n)
         )
+        if capped_ids:
+            q = q.where(or_(Vacancy.company_id.is_(None), Vacancy.company_id.notin_(capped_ids)))
+        q = q.order_by(Vacancy.ai_score.desc()).limit(n)
+        result = await session.execute(q)
         vacancies = result.scalars().all()
 
     if not vacancies:

@@ -137,6 +137,9 @@ class Settings(BaseSettings):
     # Цикл откликов (целевое количество успешных откликов за один прогон, 0 = до дневного лимита)
     applies_per_cycle: int = 10
 
+    # Лимит откликов на одну компанию (защита от спама)
+    max_applies_per_company: int = 2
+
     # ── База ──────────────────────────────────────────────────
     database_url: str = "sqlite+aiosqlite:///data/jobhunter.db"
 

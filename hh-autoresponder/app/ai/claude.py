@@ -140,11 +140,7 @@ def clean_cover_letter(text: str) -> str:
     return result
 
 
-OPENROUTER_FALLBACK_MODELS = [
-    "anthropic/claude-3-haiku",
-    "openai/gpt-4o-mini",
-    "google/gemini-1.5-flash",
-]
+OPENROUTER_FALLBACK_MODELS = ["anthropic/claude-3-haiku", "openai/gpt-4o-mini"]
 
 # Паттерны «отказа ассистента» — модель не следует промпту и пишет сервисное сообщение.
 # Такой текст нельзя отправлять в отклик вместо сопроводительного письма.

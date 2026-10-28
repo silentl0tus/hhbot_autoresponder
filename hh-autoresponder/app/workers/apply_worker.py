@@ -1,6 +1,6 @@
 import asyncio
 import structlog
-from sqlalchemy import select, func, case
+from sqlalchemy import select, func, case, or_
 from sqlalchemy.orm import joinedload
 
 from app.config import settings
@@ -10,6 +10,12 @@ from app.models.application import Application, ApplicationStatus
 from app.parsers.hh import HHParser
 from app.utils.anti_detect import random_delay
 from app.services.google_sheets import append_application
+from app.services.company_limit import (
+    cleanup_capped_companies_vacancies,
+    count_company_applications,
+    get_capped_companies,
+    reject_remaining_company_vacancies,
+)
 
 log = structlog.get_logger()
 
@@ -55,6 +61,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
     humanize_letters = True
     limit_hh_dynamic = settings.max_applies_per_day_hh_max
     limit_habr_dynamic = settings.max_applies_per_day_habr_max
+    limit_company_dynamic = settings.max_applies_per_company
     cycle_target = target_count if target_count is not None else settings.applies_per_cycle
 
     try:
@@ -71,6 +78,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
             humanize_letters = _st.get("humanize_letters", True)
             limit_hh_dynamic = _st.get("max_applies_per_day_hh", settings.max_applies_per_day_hh_max)
             limit_habr_dynamic = _st.get("max_applies_per_day_habr", settings.max_applies_per_day_habr_max)
+            limit_company_dynamic = _st.get("max_applies_per_company", settings.max_applies_per_company)
             if target_count is None:
                 cycle_target = _st.get("applies_per_cycle", settings.applies_per_cycle)
     except Exception as e:
@@ -82,6 +90,17 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
             await sync_applied_from_hh()
         except Exception as e:
             log.warning("sync_applied_skip", error=str(e))
+
+    # Cleanup any lingering approved vacancies of companies that reached the limit
+    if limit_company_dynamic > 0:
+        async with async_session() as session:
+            try:
+                cleaned = await cleanup_capped_companies_vacancies(session, max_applies=limit_company_dynamic)
+                if cleaned:
+                    log.info("cleanup_capped_companies_on_start", count=cleaned)
+            except Exception as e:
+                log.warning("cleanup_capped_companies_error", error=str(e))
+
     applied = 0
 
     # Тиринг день/ночь (МСК):
@@ -133,16 +152,16 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
     )
 
     async with async_session() as session:
-        queue_count = (
-            await session.execute(
-                select(func.count(Vacancy.id)).where(
-                    Vacancy.platform.in_(list(platform_caps.keys())),
-                    Vacancy.status == VacancyStatus.APPROVED,
-                    Vacancy.ai_score >= effective_min_score,
-                    Vacancy.id.notin_(failed_3plus),
-                )
-            )
-        ).scalar() or 0
+        capped_ids, _ = await get_capped_companies(session, max_applies=limit_company_dynamic)
+        queue_stmt = select(func.count(Vacancy.id)).where(
+            Vacancy.platform.in_(list(platform_caps.keys())),
+            Vacancy.status == VacancyStatus.APPROVED,
+            Vacancy.ai_score >= effective_min_score,
+            Vacancy.id.notin_(failed_3plus),
+        )
+        if capped_ids:
+            queue_stmt = queue_stmt.where(or_(Vacancy.company_id.is_(None), Vacancy.company_id.notin_(capped_ids)))
+        queue_count = (await session.execute(queue_stmt)).scalar() or 0
 
     target_desc = f"цель: {cycle_target}" if cycle_target > 0 else "цель: до дневного лимита"
     await notifier.vlog(
@@ -190,6 +209,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
                 humanize_letters = _st.get("humanize_letters", True)
                 ai_cover_letters = _st.get("ai_cover_letters", False)
                 pass_tests = _st.get("pass_tests", True)
+                limit_company_dynamic = _st.get("max_applies_per_company", limit_company_dynamic)
         except Exception:
             pass
 
@@ -221,6 +241,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
 
         # Select next best approved vacancy
         async with async_session() as session:
+            capped_ids, _ = await get_capped_companies(session, max_applies=limit_company_dynamic)
             query = (
                 select(Vacancy)
                 .options(joinedload(Vacancy.company))
@@ -231,6 +252,8 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
                     Vacancy.id.notin_(failed_3plus),
                 )
             )
+            if capped_ids:
+                query = query.where(or_(Vacancy.company_id.is_(None), Vacancy.company_id.notin_(capped_ids)))
             if attempted_vacancy_ids:
                 query = query.where(Vacancy.id.notin_(attempted_vacancy_ids))
             query = query.order_by(fmt_priority, Vacancy.ai_score.desc()).limit(1)
@@ -370,6 +393,29 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
                     v.status = VacancyStatus.REJECTED
                     v.ai_reason = f"{v.ai_reason or ''} [Требуется тест/анкета, автотесты отключены]".strip()
                 await session.commit()
+
+            # If application succeeded or already existed, check if this company reached the limit
+            if limit_company_dynamic > 0 and (success or already):
+                comp_id = vacancy.company_id
+                comp_name = vacancy.company.name if vacancy.company else None
+                if comp_id or comp_name:
+                    async with async_session() as session:
+                        cnt = await count_company_applications(session, company_id=comp_id, company_name=comp_name)
+                        if cnt >= limit_company_dynamic:
+                            rejected = await reject_remaining_company_vacancies(
+                                session,
+                                company_id=comp_id,
+                                company_name=comp_name,
+                                max_applies=limit_company_dynamic,
+                            )
+                            if rejected:
+                                log.info(
+                                    "company_limit_reached_rejected_remaining",
+                                    company=comp_name,
+                                    applies_count=cnt,
+                                    limit=limit_company_dynamic,
+                                    rejected_remaining=rejected,
+                                )
 
             # Append to Google Sheets if it's a new application attempt (not already applied)
             if not already:
