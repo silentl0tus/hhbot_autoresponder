@@ -67,11 +67,12 @@ async def test_tunnel_manager_starts_cloudflared(monkeypatch):
 def test_ensure_resolv_conf(tmp_path, monkeypatch):
     mgr = TunnelManager()
     dummy_resolv = tmp_path / "resolv.conf"
-    dummy_resolv.write_text("nameserver 8.8.8.8\nnameserver 8.8.4.4\n", encoding="utf-8")
+    dummy_resolv.write_text("nameserver 77.88.8.8\nnameserver 8.8.4.4\n", encoding="utf-8")
 
     monkeypatch.setattr("app.services.tunnel.Path", lambda p: dummy_resolv if p == "/etc/resolv.conf" else tmp_path / p)
     mgr._ensure_resolv_conf()
 
     updated = dummy_resolv.read_text(encoding="utf-8")
     assert "nameserver 1.1.1.1" in updated
-    assert updated.startswith("nameserver 1.1.1.1")
+    assert "options use-vc" in updated
+    assert "77.88.8.8" not in updated

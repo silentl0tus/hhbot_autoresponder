@@ -38,15 +38,26 @@ class TunnelManager:
 
     @staticmethod
     def _ensure_resolv_conf() -> None:
-        """Ensure /etc/resolv.conf contains Cloudflare DNS (1.1.1.1) to avoid SRV query SERVFAIL."""
+        """Ensure /etc/resolv.conf contains Cloudflare DNS (1.1.1.1) and options use-vc to avoid SRV query SERVFAIL."""
         resolv = Path("/etc/resolv.conf")
         try:
             if resolv.exists() and os.access(resolv, os.W_OK):
                 content = resolv.read_text(encoding="utf-8")
-                if "1.1.1.1" not in content:
-                    new_content = f"nameserver 1.1.1.1\nnameserver 1.0.0.1\n{content}"
-                    resolv.write_text(new_content, encoding="utf-8")
-                    log.info("resolv_conf_updated_with_cloudflare_dns")
+                # Remove 77.88.8.8 (Yandex DNS compresses SRV records causing Go bug #27546 'server misbehaving')
+                lines = [line for line in content.splitlines() if "77.88.8.8" not in line]
+                new_lines = [
+                    "nameserver 1.1.1.1",
+                    "nameserver 1.0.0.1",
+                    "nameserver 8.8.8.8",
+                    "options use-vc",
+                ]
+                for line in lines:
+                    stripped = line.strip()
+                    if stripped and not any(stripped.startswith(prefix) for prefix in new_lines):
+                        new_lines.append(stripped)
+                new_content = "\n".join(new_lines) + "\n"
+                resolv.write_text(new_content, encoding="utf-8")
+                log.info("resolv_conf_updated_with_cloudflare_dns")
         except Exception as e:  # noqa: BLE001
             log.debug("resolv_conf_update_skipped", error=str(e))
 

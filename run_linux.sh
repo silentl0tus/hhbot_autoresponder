@@ -8,10 +8,10 @@ cd hh-autoresponder || { echo "Не удалось найти папку hh-auto
 # Обход ограничения PEP 668 (externally-managed-environment) при запуске под root в Ubuntu
 export PIP_BREAK_SYSTEM_PACKAGES=1
 
-# Настройка надёжного DNS (1.1.1.1 Cloudflare) в /etc/resolv.conf для предотвращения ошибок SRV/DNS в туннелях
-if [ -w /etc/resolv.conf ] && ! grep -q "1.1.1.1" /etc/resolv.conf 2>/dev/null; then
-    echo "Настройка DNS (1.1.1.1 Cloudflare) в /etc/resolv.conf..."
-    echo -e "nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 77.88.8.8\n$(cat /etc/resolv.conf 2>/dev/null)" > /etc/resolv.conf 2>/dev/null || true
+# Настройка надёжного DNS (1.1.1.1 Cloudflare + options use-vc для TCP) в /etc/resolv.conf
+if [ -w /etc/resolv.conf ]; then
+    echo "Настройка DNS (1.1.1.1 Cloudflare TCP) в /etc/resolv.conf..."
+    echo -e "nameserver 1.1.1.1\nnameserver 1.0.0.1\nnameserver 8.8.8.8\noptions use-vc" > /etc/resolv.conf 2>/dev/null || true
 fi
 
 # Проверяем валидность виртуального окружения
