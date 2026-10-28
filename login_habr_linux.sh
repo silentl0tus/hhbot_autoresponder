@@ -5,8 +5,8 @@ cd "$(dirname "$0")" || { echo "Не удалось перейти в папку
 echo "Переход в папку проекта..."
 cd hh-autoresponder || { echo "Не удалось найти папку hh-autoresponder"; read -p "Нажмите Enter для выхода..."; exit 1; }
 
-if [ ! -d ".venv" ]; then
-    echo "Сначала запустите run_linux.sh для установки зависимостей!"
+if [ ! -d ".venv" ] || ! .venv/bin/python -c "import sys" >/dev/null 2>&1; then
+    echo "Виртуальное окружение не найдено или повреждено. Запустите сначала ./run_linux.sh!"
     read -p "Нажмите Enter для выхода..."
     exit 1
 fi
