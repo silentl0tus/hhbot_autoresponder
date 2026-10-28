@@ -33,7 +33,7 @@ async def test_tunnel_manager_starts_ssh_tunnel(monkeypatch):
 
     async def mock_readline_stdout():
         await asyncio.sleep(0.01)
-        return b"https://test-subdomain.free.pinggy.net\n"
+        return b"https://test-subdomain.lhr.life\n"
 
     mock_stdout = AsyncMock()
     mock_stdout.readline = mock_readline_stdout
@@ -44,12 +44,11 @@ async def test_tunnel_manager_starts_ssh_tunnel(monkeypatch):
         patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)) as mock_exec,
     ):
         url = await mgr.get_or_start_tunnel()
-        assert url == "https://test-subdomain.free.pinggy.net"
-        assert mgr.public_url == "https://test-subdomain.free.pinggy.net"
+        assert url == "https://test-subdomain.lhr.life"
+        assert mgr.public_url == "https://test-subdomain.lhr.life"
         mock_exec.assert_called_once()
         exec_args = mock_exec.call_args[0]
-        assert "a.pinggy.io" in exec_args
-        assert "443" in exec_args
+        assert "nokey@localhost.run" in exec_args
 
         mgr.stop()
         mock_proc.terminate.assert_called_once()

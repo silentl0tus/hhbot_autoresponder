@@ -98,64 +98,107 @@ class TunnelManager:
         return None
 
     async def _start_ssh_tunnel(self, port: int) -> str | None:
-        """Start an SSH reverse tunnel via pinggy (port 443).
+        """Start an SSH reverse tunnel via localhost.run (port 22) or pinggy (port 443).
 
-        Does not require external binaries or DNS SRV records, bypassing ISP/RKN blocks on argotunnel.com.
+        Does not require external binaries or Cloudflare DNS SRV records,
+        bypassing ISP/RKN blocks on argotunnel.com.
         """
         ssh_bin = shutil.which("ssh")
         if not ssh_bin:
             return None
 
-        cmd = [
-            ssh_bin,
-            "-p",
-            "443",
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "ServerAliveInterval=30",
-            "-o",
-            "ConnectTimeout=10",
-            f"-R0:127.0.0.1:{port}",
-            "a.pinggy.io",
+        self._ensure_resolv_conf()
+
+        providers = [
+            (
+                "localhost.run",
+                [
+                    ssh_bin,
+                    "-o",
+                    "StrictHostKeyChecking=no",
+                    "-o",
+                    "UserKnownHostsFile=/dev/null",
+                    "-o",
+                    "ServerAliveInterval=30",
+                    "-o",
+                    "ConnectTimeout=8",
+                    "-R",
+                    f"80:127.0.0.1:{port}",
+                    "nokey@localhost.run",
+                ],
+                re.compile(r"https://[a-zA-Z0-9-]+\.(?:lhr\.life|lhrtunnel\.link|lhr\.rocks)"),
+            ),
+            (
+                "pinggy",
+                [
+                    ssh_bin,
+                    "-p",
+                    "443",
+                    "-o",
+                    "StrictHostKeyChecking=no",
+                    "-o",
+                    "UserKnownHostsFile=/dev/null",
+                    "-o",
+                    "ServerAliveInterval=30",
+                    "-o",
+                    "ConnectTimeout=8",
+                    f"-R0:127.0.0.1:{port}",
+                    "a.pinggy.io",
+                ],
+                re.compile(r"https://[a-zA-Z0-9-]+\.(?:free\.pinggy\.net|run\.pinggy-free\.link)"),
+            ),
         ]
-        log.info("starting_ssh_tunnel", port=port)
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            self._process = proc
 
-            url_pattern = re.compile(r"https://[a-zA-Z0-9-]+\.(?:free\.pinggy\.net|run\.pinggy-free\.link)")
-            url_found = asyncio.Event()
-
-            async def monitor_ssh(stream):
-                try:
-                    while proc.returncode is None:
-                        line = await stream.readline()
-                        if not line:
-                            break
-                        text = line.decode(errors="ignore")
-                        match = url_pattern.search(text)
-                        if match and not self._public_url:
-                            self._public_url = match.group(0)
-                            url_found.set()
-                            log.info("ssh_tunnel_ready", url=self._public_url)
-                except Exception as e:  # noqa: BLE001
-                    log.debug("ssh_stream_monitor_stopped", error=str(e))
-
-            if proc.stdout:
-                self._drain_tasks.append(asyncio.create_task(monitor_ssh(proc.stdout)))
-
+        for name, cmd, url_pattern in providers:
+            log.info("starting_ssh_tunnel", provider=name, port=port)
             try:
-                await asyncio.wait_for(url_found.wait(), timeout=12)
-            except TimeoutError:
-                log.warning("ssh_tunnel_timeout")
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                self._process = proc
+                url_found = asyncio.Event()
 
-        except Exception as e:  # noqa: BLE001
-            log.warning("ssh_tunnel_start_error", error=str(e))
+                async def monitor_ssh(
+                    stream,
+                    proc=proc,
+                    url_pattern=url_pattern,
+                    url_found=url_found,
+                    name=name,
+                ):
+                    try:
+                        while proc.returncode is None:
+                            line = await stream.readline()
+                            if not line:
+                                break
+                            text = line.decode(errors="ignore")
+                            match = url_pattern.search(text)
+                            if match and not self._public_url:
+                                self._public_url = match.group(0)
+                                url_found.set()
+                                log.info("ssh_tunnel_ready", provider=name, url=self._public_url)
+                            elif text.strip():
+                                log.debug("ssh_stream_log", provider=name, line=text.strip())
+                    except Exception as e:  # noqa: BLE001
+                        log.debug("ssh_stream_monitor_stopped", error=str(e))
+
+                if proc.stdout:
+                    self._drain_tasks.append(asyncio.create_task(monitor_ssh(proc.stdout)))
+
+                try:
+                    await asyncio.wait_for(url_found.wait(), timeout=10)
+                    if self._public_url:
+                        return self._public_url
+                except TimeoutError:
+                    log.warning("ssh_tunnel_timeout", provider=name)
+
+                # If this provider timed out or didn't yield a URL, stop and try next
+                self.stop()
+
+            except Exception as e:  # noqa: BLE001
+                log.warning("ssh_tunnel_start_error", provider=name, error=str(e))
+                self.stop()
 
         return self._public_url
 
