@@ -5,6 +5,7 @@
 Вы авторизуетесь руками (номер телефона, SMS/код или QR-код).
 Скрипт сохраняет сессию в data/browser_sessions/max_state.json.
 """
+
 import asyncio
 import json
 from pathlib import Path
@@ -18,6 +19,8 @@ async def main():
     pw = await async_playwright().start()
 
     launch_args = [
+        "--no-sandbox",
+        "--disable-gpu",
         "--disable-blink-features=AutomationControlled",
         "--disable-dev-shm-usage",
     ]
@@ -72,11 +75,20 @@ async def main():
                 '[class*="chat"], [class*="dialog"], [data-testid*="chat"], [class*="avatar"], input[type="search"], textarea'
             )
             # Проверяем отсутствие формы логина / ввода телефона
-            login_inputs = await page.query_selector_all('input[type="tel"], input[placeholder*="телефон"], input[placeholder*="код"]')
-            
+            login_inputs = await page.query_selector_all(
+                'input[type="tel"], input[placeholder*="телефон"], input[placeholder*="код"]'
+            )
+
             # Проверяем наличие cookies сессии
             cookies = await ctx.cookies()
-            auth_cookies = [c for c in cookies if "token" in c["name"].lower() or "auth" in c["name"].lower() or "session" in c["name"].lower() or "max" in c["name"].lower()]
+            auth_cookies = [
+                c
+                for c in cookies
+                if "token" in c["name"].lower()
+                or "auth" in c["name"].lower()
+                or "session" in c["name"].lower()
+                or "max" in c["name"].lower()
+            ]
 
             if (chat_list and len(login_inputs) == 0) or len(auth_cookies) > 0:
                 # Дополнительная пауза для синхронизации локального хранилища
@@ -87,7 +99,7 @@ async def main():
                 print(f"✅ Сессия успешно сохранена в: {storage_path}")
                 logged_in = True
                 break
-        except Exception as e:
+        except Exception:
             pass
 
     if not logged_in:

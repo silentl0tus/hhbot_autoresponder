@@ -22,6 +22,8 @@ async def main():
     pw = await async_playwright().start()
 
     launch_args = [
+        "--no-sandbox",
+        "--disable-gpu",
         "--disable-blink-features=AutomationControlled",
         "--disable-dev-shm-usage",
     ]

@@ -5,16 +5,15 @@
 - Считывать текст вопроса и варианты быстрых ответов (если рекрутер задал опрос с выбором).
 - Отправлять ответ кликом по кнопке выбора или вводом текста в чат.
 """
+
 from __future__ import annotations
 
 import asyncio
-import re
 from pathlib import Path
 from typing import Any
+
 import structlog
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
-
-from app.config import settings
 
 log = structlog.get_logger()
 
@@ -79,7 +78,7 @@ class HHChatParser:
                 self._playwright = await async_playwright().start()
                 self._browser = await self._playwright.chromium.launch(
                     headless=headless,
-                    args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+                    args=["--no-sandbox", "--disable-gpu", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
                 )
                 self._context = await self._browser.new_context(
                     storage_state=str(self.storage_path),
@@ -370,7 +369,8 @@ class HHChatParser:
                     await self._page.goto(target_url, wait_until="domcontentloaded", timeout=25000)
                     await self._page.wait_for_timeout(2000)
 
-                clicked = await self._page.evaluate(r"""(optText) => {
+                clicked = await self._page.evaluate(
+                    r"""(optText) => {
                     const btns = document.querySelectorAll('button[class*="magritte-button"]');
                     for (const btn of btns) {
                         const t = (btn.innerText || '').trim();
@@ -380,7 +380,9 @@ class HHChatParser:
                         }
                     }
                     return false;
-                }""", option_text)
+                }""",
+                    option_text,
+                )
 
                 if clicked:
                     log.info("hh_chat_option_clicked_successfully", chat_id=chat_id, option=option_text)

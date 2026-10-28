@@ -4,10 +4,12 @@
 Управляет headless-браузером Playwright, читает сообщения в диалоге с ботом-рекрутером
 (например, @giga_recruiter_bot от Сбера) и отправляет согласованные соискателем ответы.
 """
+
 import asyncio
 from pathlib import Path
+
 import structlog
-from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
 log = structlog.get_logger()
 
@@ -39,12 +41,14 @@ class MaxScreenerParser:
         try:
             self._pw = await async_playwright().start()
             launch_args = [
+                "--no-sandbox",
+                "--disable-gpu",
                 "--disable-blink-features=AutomationControlled",
                 "--disable-dev-shm-usage",
             ]
             self._browser = await self._pw.chromium.launch(
                 headless=headless,
-                args=launch_args
+                args=launch_args,
             )
 
             ctx_opts = {
@@ -102,14 +106,18 @@ class MaxScreenerParser:
                     t = (await el.inner_text()).strip()
                     if t and len(t) > 3:
                         # Проверяем, что это не наш собственный только что отправленный ответ
-                        if self.last_sent_text and (t == self.last_sent_text or t in self.last_sent_text or self.last_sent_text in t):
+                        if self.last_sent_text and (
+                            t == self.last_sent_text or t in self.last_sent_text or self.last_sent_text in t
+                        ):
                             continue
                         latest_text = t
                         break
 
             if not latest_text:
                 # Фоллбэк: ищем текстовые блоки внутри основного контейнера чата
-                chat_container = await self._page.query_selector('[class*="chat-history"], [class*="messages-list"], [id="app"]')
+                chat_container = await self._page.query_selector(
+                    '[class*="chat-history"], [class*="messages-list"], [id="app"]'
+                )
                 if chat_container:
                     all_text = await chat_container.inner_text()
                     lines = [line.strip() for line in all_text.split("\n") if line.strip()]
@@ -138,7 +146,7 @@ class MaxScreenerParser:
             input_selectors = [
                 'textarea[placeholder*="сообщение" i]',
                 'textarea[placeholder*="message" i]',
-                'textarea',
+                "textarea",
                 'div[contenteditable="true"]',
                 '[role="textbox"]',
                 'input[type="text"][placeholder*="сообщение" i]',

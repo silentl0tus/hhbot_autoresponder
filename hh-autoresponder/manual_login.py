@@ -8,6 +8,7 @@
 Запуск:
     .venv\\Scripts\\python.exe manual_login_win.py
 """
+
 import asyncio
 import json
 from pathlib import Path
@@ -21,6 +22,8 @@ async def main():
     pw = await async_playwright().start()
 
     launch_args = [
+        "--no-sandbox",
+        "--disable-gpu",
         "--disable-blink-features=AutomationControlled",
         "--disable-dev-shm-usage",
     ]
