@@ -117,7 +117,7 @@ def create_dashboard_app() -> web.Application:
     return app
 
 
-async def start_dashboard(host: str = "127.0.0.1", port: int = 8080) -> web.AppRunner:
+async def start_dashboard(host: str = "0.0.0.0", port: int = 8080) -> web.AppRunner:
     app = create_dashboard_app()
     runner = web.AppRunner(app)
     await runner.setup()
@@ -128,7 +128,7 @@ async def start_dashboard(host: str = "127.0.0.1", port: int = 8080) -> web.AppR
 
 
 def main():
-    host = settings.dashboard_host if hasattr(settings, "dashboard_host") else "127.0.0.1"
+    host = settings.dashboard_host if hasattr(settings, "dashboard_host") else "0.0.0.0"
     port = settings.dashboard_port if hasattr(settings, "dashboard_port") else 8080
     app = create_dashboard_app()
     print(f"🚀 Запуск Job Hunter Dashboard: http://{host}:{port}")

@@ -93,8 +93,8 @@ class HHChatParser:
 
                 # Проверяем, что успешно загрузился интерфейс чатов
                 url = self._page.url
-                if "/account/login" in url or "/auth/" in url:
-                    log.warning("hh_chat_session_expired", url=url)
+                if "/account/login" in url or "/auth/" in url or "vpncheeck" in url:
+                    log.warning("hh_chat_session_expired_or_blocked", url=url)
                     await self.close()
                     return False
 

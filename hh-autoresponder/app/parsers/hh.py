@@ -58,6 +58,19 @@ class HHParser:
                         resp = await client.get(HH_SEARCH, params=params)
                         resp.raise_for_status()
 
+                if "vpncheeck" in str(resp.url):
+                    log.error("hh_search_blocked_vpncheeck", url=str(resp.url), query=query)
+                    try:
+                        from app.utils import notifier
+
+                        await notifier.send(
+                            "🚨 <b>hh.ru блокирует запросы из-за VPN (/vpncheeck)</b>\n\n"
+                            "Поиск вакансий остановлен. Добавьте <code>hh.ru</code> в Direct (исключения) в Incy VPN на телефоне."
+                        )
+                    except Exception:
+                        pass
+                    break
+
                 soup = BeautifulSoup(resp.text, "lxml")
                 cards = soup.select('[data-qa="vacancy-serp__vacancy"]')
                 log.info("hh_search_results", query=query, page=page, count=len(cards))

@@ -163,7 +163,7 @@ class Settings(BaseSettings):
 
     # ── Дашборд ───────────────────────────────────────────────
     dashboard_enabled: bool = True
-    dashboard_host: str = "127.0.0.1"
+    dashboard_host: str = "0.0.0.0"
     dashboard_port: int = 8080
     dashboard_public_url: str = ""
     dashboard_auto_tunnel: bool = True

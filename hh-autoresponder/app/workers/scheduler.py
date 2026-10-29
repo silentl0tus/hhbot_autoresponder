@@ -235,7 +235,7 @@ class WorkerScheduler:
             coalesce=True,
             max_instances=1,
             misfire_grace_time=60,
-            next_run_time=datetime.now(MSK) + timedelta(minutes=10),
+            next_run_time=datetime.now(MSK) + timedelta(minutes=1),
         )
 
         # Сводка по откликам — каждые 2 часа с 10:00 до 22:00 МСК.
@@ -503,13 +503,12 @@ class WorkerScheduler:
             # Собираем актуальный статус по платформам
             status: dict[str, bool] = {}
 
-            # 1. HH — проверяем OAuth-токен (именно через него идут отклики),
-            # а НЕ куки: куки протухают раньше токена и давали ложную паузу HH,
-            # хотя OAuth-отклики работали. get_token() сам рефрешит токен.
+            # 1. HH — проверяем OAuth-токен + доступность веб-поиска (защита от vpncheeck)
+            is_vpncheeck = False
             try:
                 _tok = await hh_oauth.get_token()
                 if _tok:
-                    async with _httpx.AsyncClient(timeout=15) as _c:
+                    async with _httpx.AsyncClient(timeout=15, follow_redirects=True) as _c:
                         _r = await _c.get(
                             "https://api.hh.ru/me",
                             headers={
@@ -517,7 +516,18 @@ class WorkerScheduler:
                                 "User-Agent": "ru.hh.android/8.116",
                             },
                         )
-                    status["hh"] = _r.status_code == 200
+                        try:
+                            _web_r = await _c.get(
+                                "https://hh.ru/search/vacancy",
+                                headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64)"},
+                            )
+                            if "vpncheeck" in str(_web_r.url):
+                                is_vpncheeck = True
+                                log.error("login_health_hh_vpncheeck_blocked", url=str(_web_r.url))
+                        except Exception:
+                            pass
+
+                    status["hh"] = (_r.status_code == 200) and (not is_vpncheeck)
                 else:
                     status["hh"] = False
             except Exception as e:
@@ -561,18 +571,28 @@ class WorkerScheduler:
             # Шлём уведомление по событию newly_broken ИЛИ по cooldown
             to_notify = set(newly_broken) | set(need_remind)
             if to_notify:
-                lines = ["⚠️ <b>Нужен перелогин</b>", ""]
-                for p in sorted(to_notify):
-                    label = PLATFORM_LABEL.get(p, p)
-                    lines.append(f"• <b>{label}</b> — сессия слетела")
-                # Какие платформы продолжают работать
-                still_active = [PLATFORM_LABEL.get(p, p) for p, ok in status.items() if ok]
-                if still_active:
+                if is_vpncheeck and "hh" in to_notify and len(to_notify) == 1:
+                    msg = (
+                        "🚨 <b>hh.ru заблокирован из-за VPN!</b>\n\n"
+                        "Сервер hh.ru перенаправляет запросы на проверку <code>/vpncheeck</code>, считая ваш IP зарубежным.\n\n"
+                        "💡 <b>Решение:</b> В приложении Incy VPN добавьте <code>hh.ru</code> в список <b>Direct (Исключения)</b>, "
+                        "чтобы запросы к hh.ru шли напрямую через домашний интернет без VPN."
+                    )
+                else:
+                    lines = ["⚠️ <b>Проблема с сессией</b>", ""]
+                    for p in sorted(to_notify):
+                        label = PLATFORM_LABEL.get(p, p)
+                        if p == "hh" and is_vpncheeck:
+                            lines.append(f"• <b>{label}</b> — заблокирован VPN (редирект на /vpncheeck)")
+                        else:
+                            lines.append(f"• <b>{label}</b> — сессия слетела")
+                    still_active = [PLATFORM_LABEL.get(p, p) for p, ok in status.items() if ok]
+                    if still_active:
+                        lines.append("")
+                        lines.append("✅ Продолжают работать: " + ", ".join(still_active))
                     lines.append("")
-                    lines.append("✅ Продолжают работать: " + ", ".join(still_active))
-                lines.append("")
-                lines.append("Перелогинься через VNC, бот сам подхватит сессию.")
-                msg = "\n".join(lines)
+                    lines.append("Проверьте настройки сети или перелогиньтесь.")
+                    msg = "\n".join(lines)
                 # Тихие часы (МСК 22–9): ночью не шлём и НЕ обновляем таймстамп,
                 # чтобы утром пришло один раз, а не копилось всю ночь.
                 if self.notify and not self._is_quiet_hours():
