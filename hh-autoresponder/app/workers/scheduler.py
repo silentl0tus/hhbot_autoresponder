@@ -912,6 +912,13 @@ class WorkerScheduler:
                         log.info("sync_sheets_chat_enrichment_no_chats")
                 except Exception as e:
                     log.warning("sync_sheets_chat_enrichment_failed", error=str(e))
+                finally:
+                    try:
+                        from app.parsers.hh_chat import hh_chat_parser
+
+                        await hh_chat_parser.close()
+                    except Exception:
+                        pass
 
                 await sync_hh_statuses_to_db(statuses)
                 result = await sync_statuses_to_sheets(statuses)

@@ -33,13 +33,12 @@ _LAUNCH_ARGS = [
     "--disable-blink-features=AutomationControlled",
     "--disable-dev-shm-usage",
     "--no-sandbox",
-    # Memory savings for 1GB RAM VPS
+    # Memory and CPU savings
     "--disable-gpu",
     "--disable-software-rasterizer",
     "--disable-extensions",
     "--disable-background-networking",
-    "--disable-background-timer-throttling",
-    "--disable-renderer-backgrounding",
+    "--mute-audio",
     "--disable-features=TranslateUI,BlinkGenPropertyTrees",
     "--disable-ipc-flooding-protection",
     "--memory-pressure-off",

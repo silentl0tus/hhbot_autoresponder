@@ -87,6 +87,15 @@ class HHPlaywright:
         self._page = await browser_manager.new_page("hh")
         return self._page
 
+    async def _park_page(self) -> None:
+        """Park page on about:blank when idle to halt hh.ru JavaScript timers,
+        websockets, and animations, reducing CPU usage to 0% in PRoot."""
+        if self._page and not self._page.is_closed():
+            try:
+                await self._page.goto("about:blank", timeout=5000)
+            except Exception:
+                pass
+
     async def _login_unlocked(self) -> bool:
         """Login to hh.ru using saved session or credentials (called with self._lock held)."""
         if self._logged_in:
@@ -192,6 +201,8 @@ class HHPlaywright:
         except Exception as e:
             log.error("hh_login_error", error=str(e))
             return False
+        finally:
+            await self._park_page()
 
     async def login(self) -> bool:
         """Login to hh.ru using saved session or credentials."""
@@ -739,6 +750,8 @@ class HHPlaywright:
                 return err_msg
             log.error("hh_apply_error", url=vacancy_url, error=err_msg[:100])
             return False
+        finally:
+            await self._park_page()
 
     async def apply_to_vacancy(
         self,
@@ -1451,6 +1464,8 @@ class HHPlaywright:
 
         except Exception as e:
             log.error("hh_messages_error", error=str(e))
+        finally:
+            await self._park_page()
 
         return messages
 
@@ -1739,6 +1754,8 @@ class HHPlaywright:
 
         except Exception as e:
             log.error("hh_resume_bump_error", error=str(e))
+        finally:
+            await self._park_page()
 
         return bumped
 
