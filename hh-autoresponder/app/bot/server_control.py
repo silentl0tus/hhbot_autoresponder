@@ -1,18 +1,20 @@
 import asyncio
 import functools
-import time
 from pathlib import Path
+
 import aiohttp
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram import F, Router
 from aiogram.filters import Command
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
 from app.config import settings
 
 server_router = Router()
-
-FIFO_CMD = Path("/data/data/com.termux/files/home/root_exec.fifo")
-OUT_CMD = Path("/data/data/com.termux/files/home/root_exec.out")
 
 
 def admin_only(fn):
@@ -26,42 +28,26 @@ def admin_only(fn):
     return wrapper
 
 
-async def run_root_command(cmd: str, timeout: float = 12.0) -> str:
-    """Выполняет команду через root_commander FIFO с полными правами root."""
-    if not FIFO_CMD.exists():
-        proc = await asyncio.create_subprocess_shell(
-            cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
-        )
-        try:
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            return stdout.decode(errors="replace").strip()
-        except asyncio.TimeoutError:
-            return "⏳ Таймаут локальной команды"
-
-    if OUT_CMD.exists():
-        try:
-            OUT_CMD.unlink()
-        except Exception:
-            pass
-
+async def run_root_command(cmd: str, timeout: float = 10.0) -> str:
+    """Выполняет shell-команду асинхронно и безопасно без блокировки event loop."""
+    proc = None
     try:
-        with open(FIFO_CMD, "w") as f:
-            f.write(cmd.strip() + "\n")
-            f.flush()
-    except Exception as e:
-        return f"❌ Ошибка FIFO: {e}"
-
-    start_t = time.time()
-    while time.time() - start_t < timeout:
-        await asyncio.sleep(0.2)
-        if OUT_CMD.exists():
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        return stdout.decode(errors="replace").strip()
+    except asyncio.TimeoutError:
+        if proc:
             try:
-                content = OUT_CMD.read_text(errors="replace")
-                if "__CMD_DONE__" in content:
-                    return content.replace("__CMD_DONE__", "").strip()
+                proc.kill()
             except Exception:
                 pass
-    return "⏳ Таймаут root-демона"
+        return "⏳ Таймаут выполнения команды"
+    except Exception as e:
+        return f"❌ Ошибка: {e}"
 
 
 async def fetch_public_ip() -> str:
@@ -204,15 +190,15 @@ def server_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="📡 Перезапуск Wi-Fi", callback_data="srv_restart_wifi"),
             ],
             [
-                InlineKeyboardButton(text="⚠️ Перезагрузить телефон", callback_data="srv_reboot_ask"),
+                InlineKeyboardButton(text="⚠️ Перезагрузить смартфон", callback_data="srv_reboot_ask"),
             ],
         ]
     )
 
 
-@server_router.message(Command("server", "status"))
+@server_router.message(Command("server"))
 @admin_only
-async def cmd_server_status(message: Message, **kw):
+async def cmd_server(message: Message, **kw):
     text = await get_system_report()
     await message.answer(text, parse_mode="HTML", reply_markup=server_menu_keyboard())
 
@@ -220,10 +206,8 @@ async def cmd_server_status(message: Message, **kw):
 @server_router.callback_query(F.data == "srv_refresh")
 @admin_only
 async def cb_srv_refresh(callback: CallbackQuery, **kw):
-    await callback.answer("🔄 Обновление...")
+    await callback.answer("Обновление данных...")
     text = await get_system_report()
-    with asyncio.CancelledError:
-        pass
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=server_menu_keyboard())
     except Exception:
@@ -233,7 +217,7 @@ async def cb_srv_refresh(callback: CallbackQuery, **kw):
 @server_router.callback_query(F.data == "srv_test_net")
 @admin_only
 async def cb_srv_test_net(callback: CallbackQuery, **kw):
-    await callback.answer("⏳ Тестируем соединение...")
+    await callback.answer("⏳ Пинг 8.8.8.8 и ya.ru...")
     res = await run_root_command("ping -c 2 8.8.8.8 && ping -c 2 ya.ru", timeout=8.0)
     clean_res = res[-1500:] if len(res) > 1500 else res
     await callback.message.reply(
@@ -247,12 +231,12 @@ async def cb_srv_test_net(callback: CallbackQuery, **kw):
 async def cb_srv_restart_ts(callback: CallbackQuery, **kw):
     await callback.answer("⏳ Перезапуск Tailscale...")
     cmd = (
-        "pkill -f tailscaled; sleep 1; "
+        "pkill -f tailscaled || true; sleep 1; "
         "nohup /data/data/com.termux/files/usr/bin/tailscaled "
-        "--tun=userspace-networking "
+        "--tun=tailscale0 "
         "--state=/data/data/com.termux/files/usr/var/lib/tailscale/tailscaled.state "
         "--socket=/data/data/com.termux/files/usr/var/run/tailscale/tailscaled.sock "
-        "> /data/local/tmp/tailscaled.log 2>&1 & sleep 2; "
+        "> /data/data/com.termux/files/usr/var/log/tailscaled.log 2>&1 & sleep 2; "
         "/data/data/com.termux/files/usr/bin/tailscale --socket=/data/data/com.termux/files/usr/var/run/tailscale/tailscaled.sock ip -4"
     )
     res = await run_root_command(cmd, timeout=10.0)
@@ -267,7 +251,8 @@ async def cb_srv_restart_ts(callback: CallbackQuery, **kw):
 async def cb_srv_restart_wifi(callback: CallbackQuery, **kw):
     await callback.answer("📡 Перезапуск Wi-Fi...")
     res = await run_root_command(
-        "svc wifi disable; sleep 3; svc wifi enable; sleep 3; ip addr show wlan0", timeout=12.0
+        "/system/bin/svc wifi disable; sleep 3; /system/bin/svc wifi enable; sleep 3; ip -4 addr show wlan0",
+        timeout=12.0,
     )
     await callback.message.reply(
         f"📡 <b>Статус Wi-Fi после рестарта:</b>\n<pre>{res[-1000:]}</pre>",
@@ -308,9 +293,10 @@ async def cb_srv_reboot_cancel(callback: CallbackQuery, **kw):
 async def cb_srv_reboot_confirm(callback: CallbackQuery, **kw):
     await callback.answer("🔄 Выполняется перезагрузка...")
     await callback.message.edit_text(
-        "🔄 <b>Смартфон перезагружается...</b>\nСвязь восстановится через 30-45 секунд.", parse_mode="HTML"
+        "🔄 <b>Смартфон перезагружается...</b>\nСвязь восстановится через 30-45 секунд.",
+        parse_mode="HTML",
     )
-    await run_root_command("sync; reboot", timeout=3.0)
+    await run_root_command("/system/bin/reboot || reboot", timeout=3.0)
 
 
 @server_router.message(Command("reboot"))
@@ -349,7 +335,6 @@ async def cmd_exec(message: Message, **kw):
     if not res:
         res = "[Команда завершилась без вывода]"
 
-    # Telegram limit 4096 chars
     if len(res) > 3800:
         res = res[:3800] + "\n... [вывод обрезан]"
 
