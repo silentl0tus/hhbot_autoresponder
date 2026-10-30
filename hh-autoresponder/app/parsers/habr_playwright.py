@@ -13,7 +13,7 @@ HABR_STATE_PATH = Path("data/browser_sessions/habr_state.json")
 
 
 class HabrPlaywright:
-    async def apply_to_vacancy(self, url: str, cover_letter: str | typing.Callable) -> bool:
+    async def apply_to_vacancy(self, url: str, cover_letter: str | typing.Callable) -> bool | str:
         if not HABR_STATE_PATH.exists():
             log.error("habr_apply_error", reason="No session state", path=str(HABR_STATE_PATH))
             return False
@@ -27,8 +27,63 @@ class HabrPlaywright:
                 context = await browser.new_context(storage_state=HABR_STATE_PATH)
                 page = await context.new_page()
 
-                await page.goto(url)
-                await random_delay(2, 4)
+                try:
+                    resp = await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                except Exception as e:
+                    log.warning("habr_goto_timeout", url=url, error=str(e))
+                    return False
+
+                if resp and resp.status == 404:
+                    log.info("habr_apply_vacancy_404", url=url)
+                    return "archived"
+
+                content = await page.content()
+                if any(
+                    marker in content
+                    for marker in ("Ошибка 404", "закрыла свой профиль", "Вакансия в архиве", "вакансия закрыта")
+                ):
+                    log.info("habr_apply_vacancy_archived", url=url)
+                    return "archived"
+
+                # Check if already applied
+                already_applied = page.locator(
+                    "a:has-text('Вы откликнулись'), div:has-text('Вы откликнулись'), .applied-label"
+                )
+                if await already_applied.count() > 0:
+                    log.info("habr_already_applied", url=url)
+                    return "already"
+
+                # Check if external response (on company website)
+                external_btn = page.locator("a[href*='external_response'], a:has-text('Откликнуться у компании')")
+                if await external_btn.count() > 0:
+                    log.info("habr_external_response_only", url=url)
+                    return "external"
+
+                if resp and resp.status == 404:
+                    log.info("habr_apply_vacancy_404", url=url)
+                    return "archived"
+
+                content = await page.content()
+                if any(
+                    marker in content
+                    for marker in ("Ошибка 404", "закрыла свой профиль", "Вакансия в архиве", "вакансия закрыта")
+                ):
+                    log.info("habr_apply_vacancy_archived", url=url)
+                    return "archived"
+
+                # Check if already applied
+                already_applied = page.locator(
+                    "a:has-text('Вы откликнулись'), div:has-text('Вы откликнулись'), .applied-label"
+                )
+                if await already_applied.count() > 0:
+                    log.info("habr_already_applied", url=url)
+                    return "already"
+
+                # Check if external response (on company website)
+                external_btn = page.locator("a[href*='external_response'], a:has-text('Откликнуться у компании')")
+                if await external_btn.count() > 0:
+                    log.info("habr_external_response_only", url=url)
+                    return "external"
 
                 # Check if "Откликнуться" button exists
                 # In Habr Career, the button is usually an anchor or button with specific text/class
@@ -36,6 +91,8 @@ class HabrPlaywright:
                 apply_btn = page.locator("a[href*='/applications/new']").first
                 if await apply_btn.count() == 0:
                     apply_btn = page.locator("button:has-text('Откликнуться')").first
+                if await apply_btn.count() == 0:
+                    apply_btn = page.locator("a:has-text('Откликнуться')").first
 
                 if await apply_btn.count() > 0:
                     await apply_btn.click()

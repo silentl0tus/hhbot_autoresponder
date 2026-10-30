@@ -374,22 +374,33 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
 
             success = result is True  # True != "already"
             already = result == "already"
+            is_archived = result == "archived"
+            is_external = result == "external"
             needs_test_skipped = (result == "needs_test") and (not pass_tests)
 
             # Записываем результат
             final_letter = letter_box["text"] if callable(letter) else letter
             async with async_session() as session:
                 if not already:
+                    err_msg = None
+                    if needs_test_skipped:
+                        err_msg = "needs_test: авто-прохождение тестов отключено"
+                    elif is_archived:
+                        err_msg = "Вакансия в архиве или удалена (404)"
+                    elif is_external:
+                        err_msg = "Отклик только на внешнем сайте компании"
+
                     # Don't log application if already applied
                     app = Application(
                         vacancy_id=vacancy.id,
                         platform=vacancy.platform,
                         cover_letter=final_letter,
                         status=ApplicationStatus.SENT if success else ApplicationStatus.FAILED,
-                        error_message="needs_test: авто-прохождение тестов отключено" if needs_test_skipped else None,
+                        error_message=err_msg,
                         attempt_count=1,
                     )
                     session.add(app)
+                    await session.flush()
 
                 v = await session.get(Vacancy, vacancy.id)
                 if success:
@@ -397,9 +408,30 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
                     applied += 1
                 elif already:
                     v.status = VacancyStatus.APPLIED
+                elif is_archived:
+                    v.status = VacancyStatus.ARCHIVED
+                    v.ai_reason = f"{v.ai_reason or ''} [Вакансия в архиве / 404]".strip()
+                elif is_external:
+                    v.status = VacancyStatus.REJECTED
+                    v.ai_reason = f"{v.ai_reason or ''} [Внешний отклик на сайте компании]".strip()
                 elif needs_test_skipped:
                     v.status = VacancyStatus.REJECTED
                     v.ai_reason = f"{v.ai_reason or ''} [Требуется тест/анкета, автотесты отключены]".strip()
+                else:
+                    # Circuit breaker: если вакансия падает 3+ раз, переводим в REJECTED,
+                    # чтобы не крутить её бесконечно каждые сутки
+                    fail_count = (
+                        await session.execute(
+                            select(func.count(Application.id)).where(
+                                Application.vacancy_id == vacancy.id,
+                                Application.status == ApplicationStatus.FAILED,
+                            )
+                        )
+                    ).scalar() or 0
+                    if fail_count >= 3:
+                        v.status = VacancyStatus.REJECTED
+                        v.ai_reason = f"{v.ai_reason or ''} [3+ неудачных попыток отклика]".strip()
+                        log.warning("vacancy_rejected_circuit_breaker", vacancy_id=v.id, failures=fail_count)
                 await session.commit()
 
             # If application succeeded or already existed, check if this company reached the limit
@@ -441,7 +473,17 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
                     salary_str = f"до {vacancy.salary_to} {vacancy.salary_currency}"
 
                 sheets_status = (
-                    "Ждем ответа" if success else ("Требуется тест (вручную)" if needs_test_skipped else "Ошибка")
+                    "Ждем ответа"
+                    if success
+                    else (
+                        "В архиве"
+                        if is_archived
+                        else (
+                            "Внешний сайт"
+                            if is_external
+                            else ("Требуется тест (вручную)" if needs_test_skipped else "Ошибка")
+                        )
+                    )
                 )
 
                 await append_application(

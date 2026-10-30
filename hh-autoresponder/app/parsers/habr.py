@@ -135,13 +135,43 @@ class HabrParser(BaseParser):
         return vacancies
 
     async def get_vacancy_details(self, url: str) -> Optional[ParsedVacancy]:
+        ext_id = url.rstrip("/").split("/")[-1].split("?")[0]
         try:
             async with httpx.AsyncClient(headers=HEADERS, follow_redirects=True, timeout=15) as client:
                 resp = await client.get(url)
+                if resp.status_code == 404:
+                    log.info("habr_vacancy_404_archived", url=url, external_id=ext_id)
+                    return ParsedVacancy(
+                        platform=HabrParser.platform,
+                        external_id=ext_id,
+                        url=url,
+                        is_archived=True,
+                    )
                 if resp.status_code != 200:
                     return None
 
             soup = BeautifulSoup(resp.text, "lxml")
+
+            is_archived = False
+            raw_text = soup.get_text()
+            if any(
+                marker in raw_text
+                for marker in ("Ошибка 404", "закрыла свой профиль", "Вакансия в архиве", "вакансия закрыта")
+            ):
+                is_archived = True
+            elif soup.select_one(".vacancy-archive, .archive-banner, [data-qa='vacancy-archive-header']"):
+                is_archived = True
+
+            is_archived = False
+            raw_text = soup.get_text()
+            if any(
+                marker in raw_text
+                for marker in ("Ошибка 404", "закрыла свой профиль", "Вакансия в архиве", "вакансия закрыта")
+            ):
+                is_archived = True
+            elif soup.select_one(".vacancy-archive, .archive-banner, [data-qa='vacancy-archive-header']"):
+                is_archived = True
+
             desc_el = soup.find("div", class_="vacancy-description__text")
             desc_text = desc_el.text.strip() if desc_el else ""
 
@@ -164,10 +194,12 @@ class HabrParser(BaseParser):
 
             vac = ParsedVacancy(
                 platform=HabrParser.platform,
+                external_id=ext_id,
                 url=url,
                 description=desc_text,
                 location=loc,
                 is_remote=remote,
+                is_archived=is_archived,
             )
             return vac
         except Exception as e:
@@ -185,7 +217,7 @@ class HabrParser(BaseParser):
 
     async def apply_to_vacancy(
         self, url: str, cover_letter: str | typing.Callable, screenshot_name: str | None = None
-    ) -> bool:
+    ) -> bool | str:
         """Apply via Playwright if available, otherwise skip."""
         try:
             from app.parsers.habr_playwright import habr_playwright
