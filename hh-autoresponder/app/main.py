@@ -11,6 +11,7 @@ from app.config import settings
 from app.database import engine
 from app.models.base import Base
 from app.bot.handlers import router, set_scheduler
+from app.bot.server_control import server_router
 from app.workers.scheduler import WorkerScheduler
 
 log = structlog.get_logger()
@@ -87,12 +88,14 @@ async def main():
         log.info("using_tg_proxy", proxy=settings.tg_proxy)
     bot = Bot(token=settings.tg_bot_token, session=session)
     dp = Dispatcher()
+    dp.include_router(server_router)
     dp.include_router(router)
 
     # Регистрируем команды — появятся в меню (кнопка ☰ в Telegram)
     await bot.set_my_commands(
         [
             BotCommand(command="start", description="🏠 Главное меню"),
+            BotCommand(command="server", description="🖥️ Статус смартфона и сетей"),
             BotCommand(command="dashboard", description="🌐 Веб-дашборд"),
             BotCommand(command="stats", description="📊 Статистика"),
             BotCommand(command="vacancies", description="🔍 Найденные вакансии"),
@@ -104,6 +107,7 @@ async def main():
             BotCommand(command="blacklist", description="🚫 Чёрный список компаний"),
             BotCommand(command="balance", description="🤖 Модели и Настройки ИИ"),
             BotCommand(command="ai", description="🤖 Модели и Настройки ИИ"),
+            BotCommand(command="reboot", description="🔄 Перезагрузить смартфон"),
         ]
     )
 

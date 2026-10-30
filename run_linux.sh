@@ -64,13 +64,17 @@ else
     python3 -m pip install -e .
 fi
 
-echo "Установка браузеров Playwright..."
-# На ARM64 (aarch64) в Ubuntu/proot ставим Chromium со всеми системными библиотеками
-python3 -m playwright install --with-deps chromium 2>/dev/null \
-    || python3 -m playwright install chromium 2>/dev/null \
-    || playwright install --with-deps chromium 2>/dev/null \
-    || playwright install chromium 2>/dev/null \
-    || true
+echo "Проверка браузеров Playwright..."
+if [ ! -d "$HOME/.cache/ms-playwright" ] || [ -z "$(ls -A "$HOME/.cache/ms-playwright" 2>/dev/null)" ]; then
+    echo "Установка браузеров Playwright (первичная настройка)..."
+    python3 -m playwright install --with-deps chromium 2>/dev/null \
+        || python3 -m playwright install chromium 2>/dev/null \
+        || playwright install --with-deps chromium 2>/dev/null \
+        || playwright install chromium 2>/dev/null \
+        || true
+else
+    echo "Браузер Playwright уже установлен в кэше."
+fi
 
 echo "==========================================="
 echo "Запуск hh-autoresponder..."
