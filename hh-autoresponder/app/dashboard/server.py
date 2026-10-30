@@ -11,6 +11,7 @@ from app.dashboard.api import (
     get_recent_logs,
     get_vacancies_list,
     inspect_vacancy,
+    trigger_cleanup_archived,
     trigger_reset_failed,
     trigger_reset_rejected,
 )
@@ -97,6 +98,15 @@ async def handle_api_reset_failed(request: web.Request) -> web.Response:
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
+async def handle_api_cleanup_archived(request: web.Request) -> web.Response:
+    try:
+        count = await trigger_cleanup_archived()
+        return web.json_response({"success": True, "count": count})
+    except Exception as e:  # noqa: BLE001
+        log.error("dashboard_action_cleanup_archived_error", error=str(e))
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
 async def handle_api_inspector_check(request: web.Request) -> web.Response:
     try:
         payload = await request.json()
@@ -119,6 +129,7 @@ def create_dashboard_app() -> web.Application:
     app.router.add_get("/api/logs", handle_api_logs)
     app.router.add_post("/api/actions/reset_rejected", handle_api_reset_rejected)
     app.router.add_post("/api/actions/reset_failed", handle_api_reset_failed)
+    app.router.add_post("/api/actions/cleanup_archived", handle_api_cleanup_archived)
     app.router.add_post("/api/inspector/check", handle_api_inspector_check)
 
     # Static files

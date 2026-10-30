@@ -39,7 +39,7 @@ async def run_root_command(cmd: str, timeout: float = 10.0) -> str:
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         return stdout.decode(errors="replace").strip()
-    except asyncio.TimeoutError:
+    except TimeoutError:
         if proc:
             try:
                 proc.kill()
@@ -191,11 +191,14 @@ def server_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="📱 Экран scrcpy", callback_data="srv_scrcpy_info"),
             ],
             [
+                InlineKeyboardButton(text="🗑️ Очистить архив", callback_data="srv_clean_archived_ask"),
                 InlineKeyboardButton(text="📶 Тест сети", callback_data="srv_test_net"),
-                InlineKeyboardButton(text="🦎 Перезапуск Tailscale", callback_data="srv_restart_ts"),
             ],
             [
+                InlineKeyboardButton(text="🦎 Перезапуск Tailscale", callback_data="srv_restart_ts"),
                 InlineKeyboardButton(text="📡 Перезапуск Wi-Fi", callback_data="srv_restart_wifi"),
+            ],
+            [
                 InlineKeyboardButton(text="⚠️ Перезагрузить смартфон", callback_data="srv_reboot_ask"),
             ],
         ]
@@ -332,6 +335,87 @@ async def cb_srv_restart_wifi(callback: CallbackQuery, **kw):
     await callback.message.reply(
         f"📡 <b>Статус Wi-Fi после рестарта:</b>\n<pre>{res[-1000:]}</pre>",
         parse_mode="HTML",
+    )
+
+
+@server_router.callback_query(F.data == "srv_clean_archived_ask")
+@admin_only
+async def cb_srv_clean_archived_ask(callback: CallbackQuery, **kw):
+    await callback.answer()
+    from cleanup_archived import cleanup_archived_vacancies
+
+    preview = await cleanup_archived_vacancies(dry_run=True)
+    count = preview.get("count_vacancies", 0)
+    if count == 0:
+        await callback.message.reply("ℹ️ В базе данных нет архивных вакансий для удаления.")
+        return
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"🗑️ Да, удалить {count} вакансий",
+                    callback_data="srv_clean_archived_confirm",
+                ),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="srv_reboot_cancel"),
+            ]
+        ]
+    )
+    await callback.message.reply(
+        f"📦 <b>Очистка базы данных:</b>\n\n"
+        f"Найдено архивных вакансий: <b>{count}</b>\n"
+        f"Связанных сообщений рекрутеров: <b>{preview.get('count_messages', 0)}</b>\n\n"
+        "Удалить эти записи и выполнить оптимизацию базы (VACUUM)?",
+        parse_mode="HTML",
+        reply_markup=kb,
+    )
+
+
+@server_router.callback_query(F.data == "srv_clean_archived_confirm")
+@admin_only
+async def cb_srv_clean_archived_confirm(callback: CallbackQuery, **kw):
+    await callback.answer("⏳ Удаление архивных вакансий...")
+    from cleanup_archived import cleanup_archived_vacancies
+
+    res = await cleanup_archived_vacancies(dry_run=False)
+    await callback.message.edit_text(
+        f"✅ <b>Архив успешно очищен!</b>\n\n"
+        f"• Удалено вакансий: <b>{res.get('count_vacancies', 0)}</b>\n"
+        f"• Удалено сообщений: <b>{res.get('count_messages', 0)}</b>\n"
+        f"• База данных оптимизирована (VACUUM).",
+        parse_mode="HTML",
+    )
+
+
+@server_router.message(Command("clean_archived"))
+@admin_only
+async def cmd_clean_archived(message: Message, **kw):
+    from cleanup_archived import cleanup_archived_vacancies
+
+    preview = await cleanup_archived_vacancies(dry_run=True)
+    count = preview.get("count_vacancies", 0)
+    if count == 0:
+        await message.reply("ℹ️ В базе данных нет архивных вакансий.")
+        return
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"🗑️ Да, удалить {count} вакансий",
+                    callback_data="srv_clean_archived_confirm",
+                ),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="srv_reboot_cancel"),
+            ]
+        ]
+    )
+    await message.reply(
+        f"📦 <b>Очистка архивных вакансий:</b>\n\n"
+        f"Найдено: <b>{count}</b> вакансий\n"
+        f"Связанных сообщений: <b>{preview.get('count_messages', 0)}</b>\n\n"
+        "Подтвердить удаление?",
+        parse_mode="HTML",
+        reply_markup=kb,
     )
 
 

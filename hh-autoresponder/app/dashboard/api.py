@@ -468,6 +468,14 @@ async def trigger_reset_failed() -> int:
         return count
 
 
+async def trigger_cleanup_archived() -> int:
+    """Удаляет вакансии в статусе ARCHIVED и связанные данные."""
+    from cleanup_archived import cleanup_archived_vacancies
+
+    res = await cleanup_archived_vacancies(dry_run=False)
+    return res.get("count_vacancies", 0)
+
+
 def _build_verdict(
     status_val: str,
     ai_score: float | None,

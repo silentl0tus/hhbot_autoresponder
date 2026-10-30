@@ -42,12 +42,14 @@ async def send_captcha_to_user(screenshot_path: str) -> None:
         log.warning("captcha_screenshot_not_found", path=str(path))
         return
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✏️ Ввести текст", callback_data="captcha_enter"),
-            InlineKeyboardButton(text="⏭ Пропустить", callback_data="captcha_skip"),
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✏️ Ввести текст", callback_data="captcha_enter"),
+                InlineKeyboardButton(text="⏭ Пропустить", callback_data="captcha_skip"),
+            ]
         ]
-    ])
+    )
 
     photo = BufferedInputFile(path.read_bytes(), filename=path.name)
     await _bot.send_photo(
@@ -59,6 +61,7 @@ async def send_captcha_to_user(screenshot_path: str) -> None:
     )
     log.info("captcha_screenshot_sent_to_user", chat_id=_chat_id)
     log.info("captcha_screenshot_sent_to_user", chat_id=_chat_id)
+
 
 async def send_error_screenshot(screenshot_path: str, caption: str) -> None:
     """Send a generic error screenshot to the admin Telegram chat."""

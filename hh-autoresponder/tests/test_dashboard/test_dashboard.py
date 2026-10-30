@@ -21,6 +21,7 @@ def test_dashboard_routes_registered():
     assert "/api/messages" in routes
     assert "/api/logs" in routes
     assert "/api/actions/reset_rejected" in routes
+    assert "/api/actions/cleanup_archived" in routes
     assert "/api/inspector/check" in routes
 
 

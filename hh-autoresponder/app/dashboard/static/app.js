@@ -103,6 +103,33 @@ function initEventListeners() {
     });
   }
 
+  // Clean archived button
+  const cleanArchivedBtn = document.getElementById('btnCleanArchived');
+  if (cleanArchivedBtn) {
+    cleanArchivedBtn.addEventListener('click', async () => {
+      if (!confirm('Удалить все архивные (закрытые) вакансии из базы данных?')) {
+        return;
+      }
+      cleanArchivedBtn.disabled = true;
+      cleanArchivedBtn.textContent = 'Очистка...';
+      try {
+        const resp = await fetch('/api/actions/cleanup_archived', { method: 'POST' });
+        const res = await resp.json();
+        if (res.success) {
+          alert(`Успешно удалено ${res.count} архивных вакансий из базы данных!`);
+          refreshAllData();
+        } else {
+          alert(`Ошибка: ${res.error}`);
+        }
+      } catch (e) {
+        alert(`Ошибка сети: ${e.message}`);
+      } finally {
+        cleanArchivedBtn.disabled = false;
+        cleanArchivedBtn.textContent = '🗑️ Очистить архив';
+      }
+    });
+  }
+
   // Reset rejected modal
   const openResetBtn = document.getElementById('btnResetRejected');
   const modal = document.getElementById('resetModal');
