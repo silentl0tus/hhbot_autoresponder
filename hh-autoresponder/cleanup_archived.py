@@ -4,7 +4,7 @@ import argparse
 import asyncio
 
 import structlog
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, select
 
 from app.database import async_session, engine
 from app.models.ai_generation import AIGeneration
@@ -68,7 +68,8 @@ async def cleanup_archived_vacancies(dry_run: bool = False) -> dict:
         # Сжатие SQLite файла (освобождение дискового пространства)
         try:
             async with engine.connect() as conn:
-                await conn.execution_options(isolation_level="AUTOCOMMIT").execute(text("VACUUM;"))
+                sync_conn = await conn.get_raw_connection()
+                await sync_conn.driver_connection.execute("VACUUM")
         except Exception as e:  # noqa: BLE001
             log.warning("sqlite_vacuum_skipped", error=str(e))
 

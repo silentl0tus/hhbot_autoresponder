@@ -87,6 +87,11 @@ function initEventListeners() {
       resetFailedBtn.textContent = 'Сброс...';
       try {
         const resp = await fetch('/api/actions/reset_failed', { method: 'POST' });
+        if (!resp.ok) {
+          const errText = await resp.text();
+          alert(`Ошибка сервера (${resp.status}): ${errText}`);
+          return;
+        }
         const res = await resp.json();
         if (res.success) {
           alert(`Успешно очищено ${res.count} старых записей об ошибках! Вакансии готовы к повторным откликам.`);
@@ -114,6 +119,11 @@ function initEventListeners() {
       cleanArchivedBtn.textContent = 'Очистка...';
       try {
         const resp = await fetch('/api/actions/cleanup_archived', { method: 'POST' });
+        if (!resp.ok) {
+          const errText = await resp.text();
+          alert(`Ошибка сервера (${resp.status}): ${errText}`);
+          return;
+        }
         const res = await resp.json();
         if (res.success) {
           alert(`Успешно удалено ${res.count} архивных вакансий из базы данных!`);
@@ -122,7 +132,7 @@ function initEventListeners() {
           alert(`Ошибка: ${res.error}`);
         }
       } catch (e) {
-        alert(`Ошибка сети: ${e.message}`);
+        alert(`Ошибка: ${e.message}`);
       } finally {
         cleanArchivedBtn.disabled = false;
         cleanArchivedBtn.textContent = '🗑️ Очистить архив';
