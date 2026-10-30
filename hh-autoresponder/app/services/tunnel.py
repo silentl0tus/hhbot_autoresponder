@@ -61,6 +61,36 @@ class TunnelManager:
         except Exception as e:  # noqa: BLE001
             log.debug("resolv_conf_update_skipped", error=str(e))
 
+    def get_network_urls(self) -> list[tuple[str, str]]:
+        """Return a list of (label, url) for all reachable interfaces."""
+        port = getattr(settings, "dashboard_port", 8080)
+        urls: list[tuple[str, str]] = []
+        import socket
+
+        # Wi-Fi / LAN IP
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                lan_ip = s.getsockname()[0]
+                if lan_ip and not lan_ip.startswith("127."):
+                    urls.append(("Wi-Fi / Локальная сеть", f"http://{lan_ip}:{port}"))
+        except Exception:
+            pass
+
+        # Tailscale interface if available
+        try:
+            import subprocess
+
+            res = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=2)
+            ts_ip = res.stdout.strip()
+            if ts_ip and ts_ip.startswith("100."):
+                urls.append(("Tailscale VPN", f"http://{ts_ip}:{port}"))
+        except Exception:
+            pass
+
+        urls.append(("Это устройство", f"http://localhost:{port}"))
+        return urls
+
     def get_local_url(self) -> str:
         port = getattr(settings, "dashboard_port", 8080)
         host = getattr(settings, "dashboard_host", "127.0.0.1")

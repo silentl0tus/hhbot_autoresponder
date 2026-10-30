@@ -1,47 +1,47 @@
 import asyncio
 import contextlib
 import functools
-import structlog
 import html as _html
 
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+import structlog
+from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from sqlalchemy import select, func
-from sqlalchemy.orm import selectinload, joinedload
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from sqlalchemy import func, select
+from sqlalchemy.orm import joinedload, selectinload
 
-from app.config import settings, save_env_variable
+from app.ai.claude import claude_ai, clean_screener_answer
+from app.bot.keyboards import (
+    ai_models_keyboard,
+    behavior_keyboard,
+    clear_neg_keyboard,
+    confirm_apply_keyboard,
+    custom_ai_keyboard,
+    dashboard_keyboard,
+    hh_chat_card_keyboard,
+    hh_chat_list_keyboard,
+    hh_chat_menu_keyboard,
+    limits_keyboard,
+    main_menu,
+    manual_cover_keyboard,
+    screener_card_keyboard,
+    screener_menu_keyboard,
+    settings_keyboard,
+    stats_keyboard,
+    vacancy_keyboard,
+    vacancy_list_keyboard,
+)
+from app.config import save_env_variable, settings
 from app.database import async_session
-from app.models.vacancy import Vacancy, VacancyStatus
 from app.models.application import Application, ApplicationStatus
 from app.models.blacklist import Blacklist
 from app.models.message import RecruiterMessage
-from app.ai.claude import claude_ai, clean_screener_answer
-from app.bot.keyboards import (
-    main_menu,
-    vacancy_keyboard,
-    vacancy_list_keyboard,
-    confirm_apply_keyboard,
-    manual_cover_keyboard,
-    settings_keyboard,
-    clear_neg_keyboard,
-    behavior_keyboard,
-    limits_keyboard,
-    stats_keyboard,
-    ai_models_keyboard,
-    screener_card_keyboard,
-    screener_menu_keyboard,
-    hh_chat_card_keyboard,
-    hh_chat_menu_keyboard,
-    hh_chat_list_keyboard,
-    custom_ai_keyboard,
-    dashboard_keyboard,
-)
-from app.services.tunnel import tunnel_manager
-from app.parsers.max_screener import max_screener
+from app.models.vacancy import Vacancy, VacancyStatus
 from app.parsers.hh_chat import hh_chat_parser
+from app.parsers.max_screener import max_screener
+from app.services.tunnel import tunnel_manager
 
 router = Router()
 log = structlog.get_logger()
@@ -135,9 +135,7 @@ _hh_chat_task: asyncio.Task | None = None
 @admin_only
 async def cmd_start(message: Message, **kw):
     await message.answer(
-        "👋 <b>Job Hunter Bot v1.7.0</b>\n\n"
-        "Автоматический поиск вакансий и отклики на hh.ru\n"
-        "Используй кнопки ниже 👇",
+        "👋 <b>Job Hunter Bot v1.7.0</b>\n\nАвтоматический поиск вакансий и отклики на hh.ru\nИспользуй кнопки ниже 👇",
         parse_mode="HTML",
         reply_markup=main_menu(),
     )
@@ -272,7 +270,8 @@ async def btn_inbox(message: Message, **kw):
 async def btn_dashboard(message: Message, **kw):
     wait_msg = await message.answer("⏳ <i>Подключаю и проверяю ссылку на дашборд...</i>", parse_mode="HTML")
     public_url = await tunnel_manager.get_or_start_tunnel()
-    local_url = tunnel_manager.get_local_url()
+    net_urls = tunnel_manager.get_network_urls()
+    best_local = net_urls[0][1] if net_urls else tunnel_manager.get_local_url()
 
     text_parts = [
         "📊 <b>Веб-дашборд Job Hunter</b>\n\n",
@@ -285,9 +284,11 @@ async def btn_dashboard(message: Message, **kw):
             "🌐 <i>Удалённый туннель не запущен (установите cloudflared или укажите DASHBOARD_PUBLIC_URL в .env)</i>\n\n"
         )
 
-    text_parts.append(f"🏠 <b>Локальный доступ (с того же устройства / Wi-Fi):</b>\n<code>{local_url}</code>")
+    text_parts.append("🏠 <b>Локальный доступ:</b>\n")
+    for label, url in net_urls:
+        text_parts.append(f"  • {label}: <code>{url}</code>\n")
 
-    kb = dashboard_keyboard(url=public_url or local_url)
+    kb = dashboard_keyboard(url=public_url or best_local)
     await wait_msg.edit_text("".join(text_parts), reply_markup=kb, parse_mode="HTML")
 
 
@@ -296,7 +297,8 @@ async def btn_dashboard(message: Message, **kw):
 async def cb_dashboard_refresh(call: CallbackQuery, **kw):
     await call.answer("🔄 Обновляю туннель дашборда...")
     public_url = await tunnel_manager.get_or_start_tunnel(force_restart=True)
-    local_url = tunnel_manager.get_local_url()
+    net_urls = tunnel_manager.get_network_urls()
+    best_local = net_urls[0][1] if net_urls else tunnel_manager.get_local_url()
 
     text_parts = [
         "📊 <b>Веб-дашборд Job Hunter</b>\n\n",
@@ -309,11 +311,53 @@ async def cb_dashboard_refresh(call: CallbackQuery, **kw):
             "🌐 <i>Удалённый туннель не запущен (установите cloudflared или укажите DASHBOARD_PUBLIC_URL в .env)</i>\n\n"
         )
 
-    text_parts.append(f"🏠 <b>Локальный доступ (с того же устройства / Wi-Fi):</b>\n<code>{local_url}</code>")
+    text_parts.append("🏠 <b>Локальный доступ:</b>\n")
+    for label, url in net_urls:
+        text_parts.append(f"  • {label}: <code>{url}</code>\n")
 
-    kb = dashboard_keyboard(url=public_url or local_url)
+    kb = dashboard_keyboard(url=public_url or best_local)
     with contextlib.suppress(Exception):
         await call.message.edit_text("".join(text_parts), reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "dash_reset_rejected")
+@admin_only
+async def cb_dashboard_reset_rejected(call: CallbackQuery, **kw):
+    await call.answer("⚡ Сбрасываю отсеянные вакансии...")
+    from app.dashboard.api import trigger_reset_rejected
+
+    try:
+        count = await trigger_reset_rejected()
+        await call.message.answer(
+            f"⚡ <b>Сброшено {count} вакансий в статус NEW!</b>\nОни будут заново оценены анализатором."
+        )
+    except Exception as e:
+        await call.message.answer(f"❌ Ошибка сброса: {e}")
+
+
+@router.callback_query(F.data == "dash_reset_failed")
+@admin_only
+async def cb_dashboard_reset_failed(call: CallbackQuery, **kw):
+    await call.answer("🔄 Сбрасываю историю ошибок...")
+    from app.dashboard.api import trigger_reset_failed
+
+    try:
+        count = await trigger_reset_failed()
+        await call.message.answer(
+            f"🔄 <b>Очищено {count} записей об ошибках!</b>\nОдобренные вакансии снова разблокированы для откликов."
+        )
+    except Exception as e:
+        await call.message.answer(f"❌ Ошибка сброса: {e}")
+
+
+@router.callback_query(F.data == "dash_run_apply")
+@admin_only
+async def cb_dashboard_run_apply(call: CallbackQuery, **kw):
+    await call.answer("🚀 Запускаю цикл откликов...")
+    from app.workers.apply_worker import run_auto_apply
+
+    asyncio.create_task(run_auto_apply(auto_mode=True))
+    await call.message.answer("🚀 <b>Цикл откликов запущен в фоне!</b>\nРезультаты будут отправлены в этот чат.")
 
 
 @router.message(F.text == "🔍 Вакансии")
@@ -391,7 +435,7 @@ async def process_manual_cover(message: Message, state: FSMContext, **kw):
             await message.answer(f"❌ <b>Ошибка при генерации письма:</b>\n<code>{err}</code>", parse_mode="HTML")
     except Exception as e:
         log.error("manual_cover_error", error=str(e))
-        await message.answer(f"❌ <b>Ошибка при генерации письма:</b>\n<code>{str(e)}</code>", parse_mode="HTML")
+        await message.answer(f"❌ <b>Ошибка при генерации письма:</b>\n<code>{e!s}</code>", parse_mode="HTML")
 
 
 @router.callback_query(F.data.in_({"regen_manual_cl", "regen_manual_gemma"}))
@@ -427,7 +471,7 @@ async def cb_regen_manual_cl(callback: CallbackQuery, state: FSMContext, **kw):
             await callback.answer(f"❌ Ошибка генерации: {err}", show_alert=True)
             await callback.message.edit_text("🤖 Выберите действие:", reply_markup=manual_cover_keyboard())
     except Exception as e:
-        await callback.message.edit_text(f"❌ Ошибка: {str(e)}", parse_mode="HTML")
+        await callback.message.edit_text(f"❌ Ошибка: {e!s}", parse_mode="HTML")
 
 
 @router.callback_query(F.data == "fix_manual_cl")
@@ -501,7 +545,7 @@ async def handle_manual_cl_feedback(message: Message, state: FSMContext, **kw):
                 if "message is not modified" in str(edit_err).lower():
                     await message.reply("Текст письма не изменился после исправления.")
                 else:
-                    await message.reply(f"❌ Ошибка обновления: {str(edit_err)}")
+                    await message.reply(f"❌ Ошибка обновления: {edit_err!s}")
         elif cover_text:
             msg = await message.answer(
                 f"✅ <b>Готово:</b>\n\n{cover_text}", parse_mode="HTML", reply_markup=manual_cover_keyboard()
@@ -514,7 +558,7 @@ async def handle_manual_cl_feedback(message: Message, state: FSMContext, **kw):
             await processing_msg.delete()
         except Exception:
             pass
-        await message.reply(f"❌ Ошибка: {str(e)}")
+        await message.reply(f"❌ Ошибка: {e!s}")
 
 
 @router.message(F.text == "📩 Сообщения")
@@ -559,9 +603,10 @@ async def btn_messages(message: Message, **kw):
         lines.append(f"…и ещё {len(invites) - 25}. Полная переписка — в чатах на hh.ru.")
 
     # Подгружаем последние сообщения с Хабра из локальной БД
+    from sqlalchemy import desc, select
+
     from app.database import async_session
     from app.models.message import RecruiterMessage
-    from sqlalchemy import select, desc
 
     habr_lines = []
     try:
@@ -587,7 +632,7 @@ async def btn_messages(message: Message, **kw):
     if len(text) > 3900:
         text = text[:3900] + "\n…"
 
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
     markup = InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="💬 Открыть диалоги hh.ru", callback_data="hh_chat_list")]]
@@ -757,7 +802,7 @@ def _format_provider(label: str, base_url: str, data: dict | None) -> str:
     total = data.get("total_tokens_used", 0)
     return (
         f"<b>{label} — {name}</b>\n"
-        f"  💰 {balance} центов (${balance/100:.2f})\n"
+        f"  💰 {balance} центов (${balance / 100:.2f})\n"
         f"  📥 in: <b>{inp:,}</b>\n"
         f"  📤 out: <b>{out:,}</b>\n"
         f"  📊 total: <b>{total:,}</b>"
@@ -880,8 +925,8 @@ async def cb_ai_preset(callback: CallbackQuery, **kw):
             msg_text = "✅ Установлен пресет Google Gemini! Задайте API-ключ через кнопку."
 
         try:
-            from pathlib import Path
             import json
+            from pathlib import Path
 
             sf = Path("data/scheduler_state.json")
             st = json.loads(sf.read_text()) if sf.exists() else {}
@@ -906,8 +951,8 @@ async def cb_ai_preset(callback: CallbackQuery, **kw):
             msg_text = "✅ Установлен пресет OpenRouter! Задайте API-ключ через кнопку."
 
         try:
-            from pathlib import Path
             import json
+            from pathlib import Path
 
             sf = Path("data/scheduler_state.json")
             st = json.loads(sf.read_text()) if sf.exists() else {}
@@ -1094,8 +1139,8 @@ async def cb_set_model(callback: CallbackQuery, **kw):
 
     # Сохраняем в scheduler_state.json
     try:
-        from pathlib import Path
         import json
+        from pathlib import Path
 
         sf = Path("data/scheduler_state.json")
         st = json.loads(sf.read_text()) if sf.exists() else {}
@@ -1396,6 +1441,7 @@ async def cb_confirm_apply(callback: CallbackQuery, **kw):
     result = await parser.apply_to_vacancy(vacancy.url, cover_letter)
 
     from pathlib import Path
+
     from aiogram.types import FSInputFile
 
     if result == "already":
@@ -1406,8 +1452,7 @@ async def cb_confirm_apply(callback: CallbackQuery, **kw):
                 v.status = VacancyStatus.APPLIED
                 await session.commit()
         await callback.message.answer(
-            "ℹ️ На эту вакансию уже есть отклик (новый не отправлен).\n"
-            "Возможно, ты откликался раньше с этого аккаунта."
+            "ℹ️ На эту вакансию уже есть отклик (новый не отправлен).\nВозможно, ты откликался раньше с этого аккаунта."
         )
         p = Path("data/debug_already_applied.png")
         if p.exists():
@@ -1487,7 +1532,7 @@ async def cb_details(callback: CallbackQuery, **kw):
         company = f"\n🏢 {cname}" if cname else ""
 
     await callback.message.answer(
-        f"<b>{vacancy.title}</b>{company}{salary}{ai_info}\n\n" f"{desc}\n\n" f"🔗 <a href='{vacancy.url}'>Открыть</a>",
+        f"<b>{vacancy.title}</b>{company}{salary}{ai_info}\n\n{desc}\n\n🔗 <a href='{vacancy.url}'>Открыть</a>",
         parse_mode="HTML",
         reply_markup=vacancy_keyboard(vacancy_id),
         disable_web_page_preview=True,
@@ -1745,11 +1790,7 @@ async def cb_clear_neg_run(callback: CallbackQuery, **kw):
         return
 
     verb = "Под удаление попадёт" if mode == "dry" else "Убрано"
-    text = (
-        f"✅ <b>{title}</b>\n"
-        f"Просмотрено откликов: {res.get('scanned', 0)}\n"
-        f"{verb}: <b>{res.get('deleted', 0)}</b>"
-    )
+    text = f"✅ <b>{title}</b>\nПросмотрено откликов: {res.get('scanned', 0)}\n{verb}: <b>{res.get('deleted', 0)}</b>"
     names = res.get("names") or []
     if names:
         listed = "\n".join(f"• {n}" for n in names[:15])
@@ -1768,6 +1809,7 @@ async def cb_thank_rejections(callback: CallbackQuery, **kw):
     await callback.message.answer(f"Отправлено сообщений: {count}")
     # Always send diagnostic screenshots so we can see what hh.ru showed
     from pathlib import Path
+
     from aiogram.types import FSInputFile
 
     for name in (
@@ -1851,6 +1893,7 @@ async def login_phone(message: Message, state: FSMContext, **kw):
         await message.answer("📩 hh отправил код (SMS или почта). Пришли его сюда одним сообщением.")
     elif res.get("status") == "captcha":
         from pathlib import Path
+
         from aiogram.types import FSInputFile
 
         p = Path("data/hh_login_captcha.png")
@@ -1873,7 +1916,7 @@ async def login_phone(message: Message, state: FSMContext, **kw):
 @admin_only
 async def login_code(message: Message, state: FSMContext, **kw):
     code = (message.text or "").strip()
-    from app.parsers.hh_login import get_session, drop_session
+    from app.parsers.hh_login import drop_session, get_session
 
     sess = get_session(message.chat.id)
     if not sess:
@@ -1907,11 +1950,12 @@ async def cmd_test_apply(message: Message, **kw):
         except ValueError:
             pass
 
-    await message.answer(f"🧪 Запускаю тест-отклики hh: {n} штук со скриншотами. Это займёт ~{n*2} мин.")
+    await message.answer(f"🧪 Запускаю тест-отклики hh: {n} штук со скриншотами. Это займёт ~{n * 2} мин.")
 
     async with async_session() as session:
-        from app.services.company_limit import get_capped_companies
         from sqlalchemy import or_
+
+        from app.services.company_limit import get_capped_companies
 
         capped_ids, _ = await get_capped_companies(session)
         q = (
@@ -1933,10 +1977,11 @@ async def cmd_test_apply(message: Message, **kw):
         await message.answer("❌ Нет одобренных вакансий hh для теста")
         return
 
-    from app.ai.claude import claude_ai
     import asyncio as _async
-    from app.utils.anti_detect import random_delay
+
+    from app.ai.claude import claude_ai
     from app.models.application import Application, ApplicationStatus
+    from app.utils.anti_detect import random_delay
 
     # Pre-sync applied list so we don't re-try the same ones
     from app.workers.apply_worker import sync_applied_from_hh
@@ -1976,7 +2021,7 @@ async def cmd_test_apply(message: Message, **kw):
                 timeout=300,
             )
             info = {"path": "playwright", "result": str(res)}
-        except _async.TimeoutError:
+        except TimeoutError:
             res = False
             info = {"error": "playwright_timeout"}
         except Exception as e:
@@ -1996,6 +2041,7 @@ async def cmd_test_apply(message: Message, **kw):
         # If Playwright was used — send screenshots
         if info and info.get("path") == "playwright":
             from pathlib import Path as _Path
+
             from aiogram.types import FSInputFile as _FSI
 
             for stage in ("before", "after"):
@@ -2862,7 +2908,7 @@ async def cb_hh_chat_list(callback: CallbackQuery, **kw):
         return
 
     await status_msg.edit_text(
-        "🗂 <b>Выберите диалог для ответа:</b>\n\n" f"<i>Страница {page + 1}. 🔴 означает наличие новых сообщений.</i>",
+        f"🗂 <b>Выберите диалог для ответа:</b>\n\n<i>Страница {page + 1}. 🔴 означает наличие новых сообщений.</i>",
         parse_mode="HTML",
         reply_markup=hh_chat_list_keyboard(active_chats, page=page),
     )
@@ -3363,6 +3409,6 @@ async def captcha_text_received(message: Message, state: FSMContext, **kw):
     except ImportError:
         pass
     await message.reply(
-        f"✅ Отправлено: <code>{text}</code>\n" "Ожидаем результат...",
+        f"✅ Отправлено: <code>{text}</code>\nОжидаем результат...",
         parse_mode="HTML",
     )

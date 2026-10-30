@@ -79,6 +79,30 @@ function initEventListeners() {
     });
   }
 
+  // Reset failed button
+  const resetFailedBtn = document.getElementById('btnResetFailed');
+  if (resetFailedBtn) {
+    resetFailedBtn.addEventListener('click', async () => {
+      resetFailedBtn.disabled = true;
+      resetFailedBtn.textContent = 'Сброс...';
+      try {
+        const resp = await fetch('/api/actions/reset_failed', { method: 'POST' });
+        const res = await resp.json();
+        if (res.success) {
+          alert(`Успешно очищено ${res.count} старых записей об ошибках! Вакансии готовы к повторным откликам.`);
+          refreshAllData();
+        } else {
+          alert(`Ошибка: ${res.error}`);
+        }
+      } catch (e) {
+        alert(`Ошибка сети: ${e.message}`);
+      } finally {
+        resetFailedBtn.disabled = false;
+        resetFailedBtn.textContent = '🔄 Сбросить ошибки';
+      }
+    });
+  }
+
   // Reset rejected modal
   const openResetBtn = document.getElementById('btnResetRejected');
   const modal = document.getElementById('resetModal');
@@ -144,11 +168,11 @@ async function loadStats() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
-    renderSessions(data.sessions);
-    renderKPIs(data.summary);
-    renderFunnel(data.funnel);
-    renderTimelineChart(data.timeline);
-    renderReasons(data.reasons);
+    try { renderSessions(data.sessions); } catch (e) { console.error('renderSessions error:', e); }
+    try { renderKPIs(data.summary); } catch (e) { console.error('renderKPIs error:', e); }
+    try { renderFunnel(data.funnel); } catch (e) { console.error('renderFunnel error:', e); }
+    try { renderTimelineChart(data.timeline); } catch (e) { console.error('renderTimelineChart error:', e); }
+    try { renderReasons(data.reasons); } catch (e) { console.error('renderReasons error:', e); }
   } catch (err) {
     console.error('Error loading stats:', err);
   }

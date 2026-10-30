@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JobHunter Dashboard — Мониторинг откликов и вакансий</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="dashboard-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <div class="brand-info">
+          <h1>JobHunter Dashboard <span class="badge-ver">v1.6.0</span></h1>
+          <p>Интеллектуальный автоответчик и мониторинг откликов</p>
+        </div>
+      </div>
+
+      <!-- Health Pills -->
+      <div class="header-status-group">
+        <div id="hhSessionPill" class="status-pill warning" title="Статус браузерной сессии HeadHunter">
+          <span class="status-dot"></span>
+          <span class="status-text">HH: Проверка...</span>
+        </div>
+        <div id="habrSessionPill" class="status-pill valid" title="Статус сессии Хабр Карьера">
+          <span class="status-dot"></span>
+          <span class="status-text">Хабр: Проверка...</span>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="header-controls">
+        <select id="refreshInterval" class="ctrl-select" title="Интервал автообновления">
+          <option value="5">Авто: 5 сек</option>
+          <option value="15" selected>Авто: 15 сек</option>
+          <option value="30">Авто: 30 сек</option>
+          <option value="0">Вручную</option>
+        </select>
+        <button id="refreshBtn" class="btn-secondary" title="Обновить сейчас">
+          🔄 Обновить
+        </button>
+        <button id="btnResetFailed" class="btn-secondary" title="Сбросить старые ошибки откликов для одобренных вакансий">
+          🔄 Сбросить ошибки
+        </button>
+        <button id="btnResetRejected" class="btn-primary" title="Вернуть отсеянные вакансии на повторный скоринг">
+          ⚡ Сбросить отсеянные
+        </button>
+      </div>
+    </header>
+
+    <!-- KPI Grid -->
+    <section class="kpi-grid">
+      <div class="kpi-card purple">
+        <div class="kpi-label">Всего вакансий</div>
+        <div id="kpiTotalVacancies" class="kpi-value">0</div>
+        <div class="kpi-sub">
+          Новых: <strong id="kpiNewVacancies">0</strong> | Одобрено: <strong id="kpiApprovedVacancies">0</strong>
+        </div>
+      </div>
+
+      <div class="kpi-card emerald">
+        <div class="kpi-label">Отклики сегодня</div>
+        <div id="kpiTodaySent" class="kpi-value">0</div>
+        <div class="kpi-sub">
+          Ошибок сегодня: <strong id="kpiTodayFailed" style="color: var(--danger);">0</strong>
+        </div>
+      </div>
+
+      <div class="kpi-card cyan">
+        <div class="kpi-label">Всего отправлено</div>
+        <div id="kpiTotalSent" class="kpi-value">0</div>
+        <div class="kpi-sub">
+          Отклонено ботом: <strong id="kpiRejectedVacancies">0</strong>
+        </div>
+      </div>
+
+      <div class="kpi-card amber">
+        <div class="kpi-label">Просмотры</div>
+        <div id="kpiTotalViewed" class="kpi-value">0</div>
+        <div class="kpi-sub">
+          Конверсия в просмотр: <strong id="kpiViewRate">0%</strong>
+        </div>
+      </div>
+
+      <div class="kpi-card emerald">
+        <div class="kpi-label">Приглашения</div>
+        <div id="kpiTotalInvited" class="kpi-value">0</div>
+        <div class="kpi-sub">
+          Конверсия в оффер/интервью: <strong id="kpiInvRate">0%</strong>
+        </div>
+      </div>
+
+      <div class="kpi-card rose">
+        <div class="kpi-label">Средний AI-скор</div>
+        <div id="kpiAvgScore" class="kpi-value">—</div>
+        <div class="kpi-sub">
+          Порог отбора: <strong>55</strong>
+        </div>
+      </div>
+    </section>
+
+    <!-- Funnel and Timeline Analytics -->
+    <section class="analytics-grid">
+      <!-- Funnel Card -->
+      <div class="analytics-card">
+        <div class="card-header">
+          <h2>📊 Воронка конверсии откликов</h2>
+          <span style="font-size: 0.8rem; color: var(--text-dim);">Куда уходят вакансии на пути к отклику</span>
+        </div>
+        <div id="funnelList" class="funnel-container">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- Timeline Chart Card -->
+      <div class="analytics-card">
+        <div class="card-header">
+          <h2>📈 Динамика за последние 14 дней</h2>
+          <div style="display: flex; gap: 12px; font-size: 0.78rem;">
+            <span style="color: #10b981;">● Отправлено</span>
+            <span style="color: #06b6d4;">● Просмотрено</span>
+            <span style="color: #ef4444;">● Ошибки</span>
+          </div>
+        </div>
+        <div class="chart-box">
+          <canvas id="timelineChart"></canvas>
+        </div>
+        <div style="margin-top: 16px;">
+          <h3 style="font-size: 0.88rem; font-weight: 600; margin-bottom: 8px;">Топ причин отсева вакансий:</h3>
+          <div id="reasonsList"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tabs Container -->
+    <section class="main-tabs-card">
+      <nav class="tabs-nav">
+        <button class="tab-btn active" data-tab="tab-vacancies">
+          📋 Вакансии в базе
+        </button>
+        <button class="tab-btn" data-tab="tab-applications">
+          📨 История откликов
+        </button>
+        <button class="tab-btn" data-tab="tab-messages">
+          💬 Сообщения рекрутеров
+        </button>
+        <button class="tab-btn" data-tab="tab-inspector">
+          🔍 Инспектор вакансий
+        </button>
+        <button class="tab-btn" data-tab="tab-logs">
+          📜 Живой лог событий
+        </button>
+      </nav>
+
+      <!-- Tab 1: Vacancies -->
+      <div id="tab-vacancies" class="tab-content active">
+        <div class="table-filter-bar">
+          <div class="filter-chips">
+            <button class="filter-chip active" data-status="ALL">Все</button>
+            <button class="filter-chip" data-status="NEW">🆕 Новые (NEW)</button>
+            <button class="filter-chip" data-status="APPROVED">⭐ Одобренные (APPROVED)</button>
+            <button class="filter-chip" data-status="REJECTED">❌ Отсеянные (REJECTED)</button>
+            <button class="filter-chip" data-status="APPLIED">📨 Отправленные (APPLIED)</button>
+            <button class="filter-chip" data-status="ARCHIVED">📦 Архив (ARCHIVED)</button>
+          </div>
+          <div class="search-input-wrapper">
+            <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+            <input type="text" id="vacSearchInput" placeholder="Поиск по названию или компании...">
+          </div>
+        </div>
+
+        <div id="vacanciesList" class="vacancies-list">
+          <!-- Populated by JS -->
+        </div>
+
+        <div class="pagination">
+          <span id="pagInfo">Страница 1 из 1</span>
+          <div class="pag-buttons">
+            <button id="pagPrev" class="btn-secondary">← Назад</button>
+            <button id="pagNext" class="btn-secondary">Вперёд →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 2: Applications -->
+      <div id="tab-applications" class="tab-content">
+        <div id="applicationsList" class="vacancies-list">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- Tab 3: Messages -->
+      <div id="tab-messages" class="tab-content">
+        <div id="messagesList" class="vacancies-list">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- Tab 4: Logs -->
+      <div id="tab-logs" class="tab-content">
+        <div class="table-filter-bar">
+          <div style="font-size: 0.88rem; color: var(--text-muted);">
+            Последние 120 строк из файла <code>logs/log.txt</code>
+          </div>
+          <select id="logLevelFilter" class="ctrl-select">
+            <option value="all">Все уровни</option>
+            <option value="error">Только ошибки (ERROR)</option>
+            <option value="warning">Предупреждения (WARNING)</option>
+            <option value="info">Инфо (INFO)</option>
+          </select>
+        </div>
+        <div id="logsContainer" class="logs-console">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- Tab 5: Inspector -->
+      <div id="tab-inspector" class="tab-content">
+        <div class="inspector-box">
+          <div class="inspector-header">
+            <h3>🔍 Диагностика вакансии: Почему бот (не) откликнулся?</h3>
+            <p>Вставьте ссылку на вакансию hh.ru или её ID — бот проверит статус в базе, прогонит через правила матчера и детально объяснит решение.</p>
+          </div>
+
+          <div class="inspector-form">
+            <div class="inspector-input-group">
+              <svg class="inspector-icon" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+              <input type="text" id="inspectorQuery" placeholder="Например: https://hh.ru/vacancy/137976548 или 137976548" />
+              <button id="btnCheckVacancy" class="btn btn-primary">Проверить</button>
+            </div>
+            <div class="inspector-samples">
+              <span class="samples-title">Быстрая проверка из базы:</span>
+              <button type="button" class="sample-btn" data-id="137976548">❌ Отсеянная (137976548)</button>
+              <button type="button" class="sample-btn" data-id="136774919">📨 Отправленная (136774919)</button>
+              <button type="button" class="sample-btn" data-id="137320450">💬 В диалоге (137320450)</button>
+            </div>
+          </div>
+
+          <div id="inspectorLoading" class="inspector-loading hidden">
+            <div class="spinner"></div>
+            <span>Получаю данные вакансии и анализирую правила...</span>
+          </div>
+
+          <div id="inspectorResult" class="inspector-result hidden">
+            <!-- Dynamically populated by JS -->
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Confirmation Modal -->
+  <div id="resetModal" class="modal-overlay">
+    <div class="modal-card">
+      <h3>Сбросить отклоненные вакансии?</h3>
+      <p>
+        Это вернет все вакансии, отсеянные фильтром скоринга, в статус <strong>NEW</strong>.
+        Они будут мгновенно переоценены анализатором по вашим обновленным правилам.
+        <br><br>
+        <i>Вакансии с откликами, отказами работодателей и архивные вакансии затронуты не будут.</i>
+      </p>
+      <div class="modal-actions">
+        <button id="btnCancelReset" class="btn-secondary">Отмена</button>
+        <button id="btnConfirmReset" class="btn-primary">Да, сбросить</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

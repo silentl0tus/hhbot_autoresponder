@@ -114,6 +114,7 @@ logs/
 **/logs/
 *.log
 *.html
+!**/static/*.html
 *.bak
 *.tmp
 *.swp

@@ -1,8 +1,8 @@
 from aiogram.types import (
-    InlineKeyboardMarkup,
     InlineKeyboardButton,
-    ReplyKeyboardMarkup,
+    InlineKeyboardMarkup,
     KeyboardButton,
+    ReplyKeyboardMarkup,
 )
 
 
@@ -22,7 +22,18 @@ def dashboard_keyboard(url: str | None = None) -> InlineKeyboardMarkup:
     buttons = []
     if url and url.startswith(("http://", "https://")):
         buttons.append([InlineKeyboardButton(text="🚀 Открыть дашборд", url=url)])
-    buttons.append([InlineKeyboardButton(text="🔄 Обновить ссылку", callback_data="dash_refresh")])
+    buttons.append(
+        [
+            InlineKeyboardButton(text="🔄 Обновить ссылку", callback_data="dash_refresh"),
+            InlineKeyboardButton(text="▶️ Запустить отклики", callback_data="dash_run_apply"),
+        ]
+    )
+    buttons.append(
+        [
+            InlineKeyboardButton(text="⚡ Сбросить отсеянные", callback_data="dash_reset_rejected"),
+            InlineKeyboardButton(text="🔄 Сбросить ошибки", callback_data="dash_reset_failed"),
+        ]
+    )
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -48,7 +59,7 @@ def vacancy_list_keyboard(
     for i, vid in enumerate(vacancy_ids):
         rows.append(
             [
-                InlineKeyboardButton(text=f"📄 Подробнее #{i+1}", callback_data=f"details:{vid}"),
+                InlineKeyboardButton(text=f"📄 Подробнее #{i + 1}", callback_data=f"details:{vid}"),
                 InlineKeyboardButton(text="✅", callback_data=f"apply:{vid}"),
                 InlineKeyboardButton(text="❌", callback_data=f"skip:{vid}"),
             ]
@@ -56,10 +67,10 @@ def vacancy_list_keyboard(
 
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"{prefix}page:{page-1}"))
-    nav.append(InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop"))
+        nav.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"{prefix}page:{page - 1}"))
+    nav.append(InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="noop"))
     if page < total_pages - 1:
-        nav.append(InlineKeyboardButton(text="Вперёд ▶️", callback_data=f"{prefix}page:{page+1}"))
+        nav.append(InlineKeyboardButton(text="Вперёд ▶️", callback_data=f"{prefix}page:{page + 1}"))
     rows.append(nav)
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -424,10 +435,10 @@ def hh_chat_list_keyboard(chats: list[dict], page: int = 0) -> InlineKeyboardMar
     # Пагинация
     nav_buttons = []
     if page > 0:
-        nav_buttons.append(InlineKeyboardButton(text="⬅️ Пред.", callback_data=f"hh_chat_list:{page-1}"))
+        nav_buttons.append(InlineKeyboardButton(text="⬅️ Пред.", callback_data=f"hh_chat_list:{page - 1}"))
     nav_buttons.append(InlineKeyboardButton(text="🔄 Обновить", callback_data=f"hh_chat_list:{page}"))
     if len(chats) > end_idx:
-        nav_buttons.append(InlineKeyboardButton(text="След. ➡️", callback_data=f"hh_chat_list:{page+1}"))
+        nav_buttons.append(InlineKeyboardButton(text="След. ➡️", callback_data=f"hh_chat_list:{page + 1}"))
 
     rows.append(nav_buttons)
     rows.append([InlineKeyboardButton(text="◀️ Назад", callback_data="hh_chat_menu")])

@@ -1,21 +1,22 @@
 import asyncio
+
 import structlog
-from sqlalchemy import select, func, case, or_
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import joinedload
 
 from app.config import settings
 from app.database import async_session
-from app.models.vacancy import Vacancy, VacancyStatus
 from app.models.application import Application, ApplicationStatus
+from app.models.vacancy import Vacancy, VacancyStatus
 from app.parsers.hh import HHParser
-from app.utils.anti_detect import random_delay
-from app.services.google_sheets import append_application
 from app.services.company_limit import (
     cleanup_capped_companies_vacancies,
     count_company_applications,
     get_capped_companies,
     reject_remaining_company_vacancies,
 )
+from app.services.google_sheets import append_application
+from app.utils.anti_detect import random_delay
 
 log = structlog.get_logger()
 
@@ -27,7 +28,7 @@ async def sync_applied_from_hh() -> int:
 
     try:
         ids = await asyncio.wait_for(hh_api_client.fetch_applied_vacancy_ids(), timeout=30)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         log.warning("sync_applied_timeout")
         return 0
     if not ids:
@@ -129,15 +130,22 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
             log.info("apply_skip_paused_platform", platform=p)
             del platform_caps[p]
 
-    from app.parsers.letter_template import render_letter
-    from app.utils import notifier
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+
     from sqlalchemy import select as _select
 
-    # Исключаем те, что уже падали 3+ раз (бессмысленно ретраить)
+    from app.parsers.letter_template import render_letter
+    from app.utils import notifier
+
+    # Исключаем только те вакансии, что падали 3+ раз за последние 24 часа.
+    # Это предотвращает вечную блокировку одобренных вакансий при обновлении кук/сессии.
+    _since_24h = _dt.now() - _td(hours=24)
     failed_3plus = (
         _select(Application.vacancy_id)
         .where(
             Application.status == ApplicationStatus.FAILED,
+            Application.created_at >= _since_24h,
         )
         .group_by(Application.vacancy_id)
         .having(func.count(Application.id) >= 3)
@@ -165,7 +173,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
 
     target_desc = f"цель: {cycle_target}" if cycle_target > 0 else "цель: до дневного лимита"
     await notifier.vlog(
-        f"🚀 <b>Цикл откликов</b> ({target_desc}): в очереди {queue_count} " f"(порог score ≥ {effective_min_score})"
+        f"🚀 <b>Цикл откликов</b> ({target_desc}): в очереди {queue_count} (порог score ≥ {effective_min_score})"
     )
 
     aborted_platforms: set[str] = set()
@@ -265,7 +273,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
                 log.info("queue_empty_running_replenish")
                 await notifier.vlog("🔍 В очереди закончились одобренные вакансии. Запускаю поиск и анализ...")
                 try:
-                    from app.workers.vacancy_worker import run_vacancy_search, run_vacancy_analysis
+                    from app.workers.vacancy_worker import run_vacancy_analysis, run_vacancy_search
 
                     await run_vacancy_search()
                     await run_vacancy_analysis()
@@ -344,7 +352,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
                             log.info("hh_skip_test_disabled", vacancy_id=vacancy.id)
                             # Do NOT set skip_record = True — we record this vacancy as REJECTED
                             # and notify the user with a direct link, avoiding infinite loops.
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     log.error("hh_playwright_timeout", vacancy_id=vacancy.id)
                     result = False
             elif vacancy.platform == "habr":
@@ -356,7 +364,7 @@ async def run_auto_apply(auto_mode: bool = False, min_score: float = 70, target_
                         parser.apply_to_vacancy(vacancy.url, letter),
                         timeout=300,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     log.error("habr_apply_timeout", vacancy_id=vacancy.id)
                     result = False
 

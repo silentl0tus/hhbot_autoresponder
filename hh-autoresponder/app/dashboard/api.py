@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.database import async_session
-from app.models.application import Application
+from app.models.application import Application, ApplicationStatus
 from app.models.blacklist import Blacklist
 from app.models.company import Company
 from app.models.message import RecruiterMessage
@@ -446,6 +446,26 @@ async def trigger_reset_rejected() -> int:
 
         await session.commit()
         return len(vacancies)
+
+
+async def trigger_reset_failed() -> int:
+    """Удаляет старые неудачные попытки откликов для APPROVED вакансий,
+    чтобы бот мог немедленно повторить отклики с обновлёнными куками/сессией.
+    """
+    async with async_session() as session:
+        approved_subquery = select(Vacancy.id).where(Vacancy.status == VacancyStatus.APPROVED)
+        stmt = select(Application).where(
+            Application.status == ApplicationStatus.FAILED,
+            Application.vacancy_id.in_(approved_subquery),
+        )
+        res = await session.execute(stmt)
+        failed_apps = res.scalars().all()
+        count = len(failed_apps)
+        for app in failed_apps:
+            await session.delete(app)
+        if count:
+            await session.commit()
+        return count
 
 
 def _build_verdict(
