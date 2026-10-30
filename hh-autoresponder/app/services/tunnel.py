@@ -78,15 +78,35 @@ class TunnelManager:
             pass
 
         # Tailscale interface if available
+        ts_ip = ""
         try:
             import subprocess
 
             res = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=2)
-            ts_ip = res.stdout.strip()
-            if ts_ip and ts_ip.startswith("100."):
-                urls.append(("Tailscale VPN", f"http://{ts_ip}:{port}"))
+            candidate = res.stdout.strip()
+            if candidate and candidate.startswith("100."):
+                ts_ip = candidate
         except Exception:
             pass
+
+        if not ts_ip:
+            try:
+                import subprocess
+
+                ip_res = subprocess.run(
+                    ["ip", "-4", "-o", "addr", "show", "tailscale0"],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                )
+                m = re.search(r"inet\s+(100\.\d+\.\d+\.\d+)", ip_res.stdout)
+                if m:
+                    ts_ip = m.group(1)
+            except Exception:
+                pass
+
+        if ts_ip and ts_ip.startswith("100."):
+            urls.append(("Tailscale VPN", f"http://{ts_ip}:{port}"))
 
         urls.append(("Это устройство", f"http://localhost:{port}"))
         return urls

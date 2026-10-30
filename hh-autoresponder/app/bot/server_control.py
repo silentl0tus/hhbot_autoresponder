@@ -170,10 +170,15 @@ async def get_system_report() -> str:
         f"• Локальный Wi-Fi: <code>{wifi_ip}</code>\n"
         f"• Tailscale IP: <code>{ts_ip}</code> 🟢\n"
         f"• ТВ Samsung (Таблица 100): 🟢 Маршрутизируется\n\n"
-        "🔌 <b>Удаленный доступ (через Tailscale):</b>\n"
-        f"• SSH Termux: <code>ssh -p 8022 u0_a152@{ts_ip}</code>\n"
-        f"• Экран scrcpy: <code>adb connect {ts_ip}:5555</code>\n"
-        f"• Дашборд: <code>http://{ts_ip}:8080</code>\n"
+        "🔌 <b>Управление экраном (scrcpy, экран выключен):</b>\n"
+        f"• Дома: <code>./scrcpy -s {wifi_ip}:5555 -S -w</code>\n"
+        f"• Удаленно: <code>./scrcpy -s {ts_ip}:5555 -S -w</code>\n\n"
+        "💻 <b>Консоль SSH Termux:</b>\n"
+        f"• Дома: <code>ssh -p 8022 u0_a152@{wifi_ip}</code>\n"
+        f"• Удаленно: <code>ssh -p 8022 u0_a152@{ts_ip}</code>\n\n"
+        "📊 <b>Веб-дашборд:</b>\n"
+        f"• Дома: <code>http://{wifi_ip}:8080</code>\n"
+        f"• Удаленно: <code>http://{ts_ip}:8080</code>\n"
     )
     return msg
 
@@ -183,17 +188,87 @@ def server_menu_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="🔄 Обновить статус", callback_data="srv_refresh"),
+                InlineKeyboardButton(text="📱 Экран scrcpy", callback_data="srv_scrcpy_info"),
+            ],
+            [
                 InlineKeyboardButton(text="📶 Тест сети", callback_data="srv_test_net"),
-            ],
-            [
                 InlineKeyboardButton(text="🦎 Перезапуск Tailscale", callback_data="srv_restart_ts"),
-                InlineKeyboardButton(text="📡 Перезапуск Wi-Fi", callback_data="srv_restart_wifi"),
             ],
             [
+                InlineKeyboardButton(text="📡 Перезапуск Wi-Fi", callback_data="srv_restart_wifi"),
                 InlineKeyboardButton(text="⚠️ Перезагрузить смартфон", callback_data="srv_reboot_ask"),
             ],
         ]
     )
+
+
+@server_router.callback_query(F.data == "srv_scrcpy_info")
+@admin_only
+async def cb_srv_scrcpy_info(callback: CallbackQuery, **kw):
+    await callback.answer()
+    ts_ip = "100.67.127.66"
+    wifi_ip = "192.168.1.119"
+    try:
+        ts_res = await run_root_command(
+            "/data/data/com.termux/files/usr/bin/tailscale --socket=/data/data/com.termux/files/usr/var/run/tailscale/tailscaled.sock ip -4",
+            timeout=2.0,
+        )
+        if ts_res and "." in ts_res and not ts_res.startswith("❌"):
+            ts_ip = ts_res.strip().splitlines()[0]
+        wifi_res = await run_root_command(
+            "ip -4 addr show wlan0 | grep -o 'inet [0-9.]*' | cut -d' ' -f2",
+            timeout=2.0,
+        )
+        if wifi_res and "." in wifi_res and not wifi_res.startswith("❌"):
+            wifi_ip = wifi_res.strip().splitlines()[0]
+    except Exception:
+        pass
+
+    text = (
+        "📱 <b>Управление экраном через scrcpy (без выгорания):</b>\n\n"
+        "<i>Параметр <code>-s</code> задает точный адрес (так как ADB держит сразу два канала), "
+        "<code>-S</code> полностью гасит физическую матрицу смартфона, а <code>-w</code> не дает телефону уснуть.</i>\n\n"
+        f"🏠 <b>В домашней сети Wi-Fi:</b>\n"
+        f"<code>./scrcpy -s {wifi_ip}:5555 -S -w</code>\n\n"
+        f"🌍 <b>Удаленно из другого города (Tailscale):</b>\n"
+        f"<code>./scrcpy -s {ts_ip}:5555 -S -w</code>\n\n"
+        "💡 <i>В окне scrcpy нажмите <b>Alt + O</b>, чтобы временно включить/выключить дисплей на телефоне.</i>"
+    )
+    await callback.message.reply(text, parse_mode="HTML")
+
+
+@server_router.message(Command("scrcpy"))
+@admin_only
+async def cmd_scrcpy(message: Message, **kw):
+    ts_ip = "100.67.127.66"
+    wifi_ip = "192.168.1.119"
+    try:
+        ts_res = await run_root_command(
+            "/data/data/com.termux/files/usr/bin/tailscale --socket=/data/data/com.termux/files/usr/var/run/tailscale/tailscaled.sock ip -4",
+            timeout=2.0,
+        )
+        if ts_res and "." in ts_res and not ts_res.startswith("❌"):
+            ts_ip = ts_res.strip().splitlines()[0]
+        wifi_res = await run_root_command(
+            "ip -4 addr show wlan0 | grep -o 'inet [0-9.]*' | cut -d' ' -f2",
+            timeout=2.0,
+        )
+        if wifi_res and "." in wifi_res and not wifi_res.startswith("❌"):
+            wifi_ip = wifi_res.strip().splitlines()[0]
+    except Exception:
+        pass
+
+    text = (
+        "📱 <b>Управление экраном через scrcpy (без выгорания):</b>\n\n"
+        "<i>Параметр <code>-s</code> задает точный адрес (так как ADB держит сразу два канала), "
+        "<code>-S</code> полностью гасит физическую матрицу смартфона, а <code>-w</code> не дает телефону уснуть.</i>\n\n"
+        f"🏠 <b>В домашней сети Wi-Fi:</b>\n"
+        f"<code>./scrcpy -s {wifi_ip}:5555 -S -w</code>\n\n"
+        f"🌍 <b>Удаленно из другого города (Tailscale):</b>\n"
+        f"<code>./scrcpy -s {ts_ip}:5555 -S -w</code>\n\n"
+        "💡 <i>В окне scrcpy нажмите <b>Alt + O</b>, чтобы временно включить/выключить дисплей на телефоне.</i>"
+    )
+    await message.reply(text, parse_mode="HTML")
 
 
 @server_router.message(Command("server"))
